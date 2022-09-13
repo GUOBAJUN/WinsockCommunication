@@ -96,15 +96,16 @@ VOID RSAinit() {
 }
 
 // RSA公钥加密
-string RSA_PubKey_Encrypt(char* Buffer)
+string RSA_PubKey_Encrypt(CHAR* Buffer)
 {
 	CHAR* EncryptedText;
+	string EncryptedStr;
 	BIO* KeyBIO = BIO_new_file(ChatKey, "rb");
 	RSA* rsa = RSA_new();
 	rsa = PEM_read_bio_RSAPublicKey(KeyBIO, NULL, NULL, NULL);
 	if (!rsa) {
 		BIO_free_all(KeyBIO);
-		cerr << "RSA_PubKey_Encrypt failed" << endl;
+		cerr << "RSA_PubKey_Encrypt failed..." << endl;
 		return string("");
 	}
 
@@ -112,7 +113,41 @@ string RSA_PubKey_Encrypt(char* Buffer)
 	EncryptedText = (CHAR*)malloc(Len + 1);
 	ZeroMemory(EncryptedText,  Len + 1);
 	
-	INT iResult = RSA_public_encrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, rsa, RSA_PKCS1_PADDING);
+	INT iResult = RSA_public_encrypt(lstrlenA(Buffer), (const unsigned char*)Buffer,(unsigned char*) EncryptedText, rsa, RSA_PKCS1_PADDING);
+	if (iResult >= 0)
+		EncryptedStr = string(EncryptedText, iResult);
+	free(EncryptedText);
+	BIO_free_all(KeyBIO);
+	RSA_free(rsa);
+	return EncryptedStr;
+}
+
+// RSA私钥解密
+string RSA_Pri_Decrypt(CHAR* Buffer)
+{
+	CHAR* EncryptedText;
+	string ClearText;
+	BIO* KeyBIO = BIO_new_file(PrivateKey, "rb");
+	RSA* rsa = RSA_new();
+	rsa = PEM_read_bio_RSAPrivateKey(KeyBIO, NULL, NULL, NULL);
+	if (!rsa) {
+		cerr << "RSA_Pri_Decrypt failed..." << endl;
+		BIO_free_all(KeyBIO);
+		RSA_free(rsa);
+		return string("");
+	}
+	INT Len = RSA_size(rsa);
+	EncryptedText = (CHAR*)malloc(Len + 1);
+	ZeroMemory(EncryptedText, Len + 1);
+
+	INT iResult = RSA_private_decrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
+	if (iResult >= 0)
+		ClearText = string(EncryptedText, iResult);
+	free(EncryptedText);
+	BIO_free_all(KeyBIO);
+	RSA_free(rsa);
+	return ClearText;
+
 }
 
 VOID WINAPI Encrypt(CHAR* Buffer)
