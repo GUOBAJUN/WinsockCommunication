@@ -12,23 +12,121 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
+#include <wincrypt.h>
+
 #include <iostream>
 #include <cstring>
 #include <ctime>
 
+#include <openssl/bn.h>
+#include <openssl/aes.h>
+#include <openssl/sha.h>
+#include <openssl/rsa.h>
+#include <openssl/pem.h>
+
 #pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "crypt32.lib")
+#pragma comment(lib, "libssl.lib")
+#pragma comment(lib, "libcrypto.lib")
 
 #define SERVER_PORT "10086"
 #define DEFAULT_SERVER "127.0.0.1"
 #define DEFAULT_BUFLEN 4096
 #define UserNameLen 512
+#define DEFAULT_RSA_KETLEN 1024
 
 using std::cin;
 using std::cout;
 using std::cerr;
 using std::endl;
+using std::string;
 
 HANDLE hChatThread[2]; // Reserver线程, Sender线程
+BOOL EncryptMode = FALSE;
+
+// SHA256
+string SHA256(char* Buffer) {
+	string txt = Buffer, Result;
+	char buf[2];
+	unsigned char Hash[SHA256_DIGEST_LENGTH];
+	SHA256_CTX context;
+	SHA256_Init(&context);
+	SHA256_Update(&context, txt.c_str(), txt.size());
+	SHA256_Final(Hash, &context);
+	for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+		sprintf_s(buf, "%02x", Hash[i]);
+		Result += buf;
+	}
+	return Result;
+}
+
+// AES
+
+// RSA
+RSA *rsa;
+CHAR* PrivateKey; // 我的私钥
+CHAR* PublicKey;  // 我的公钥
+INT PriKeyLen;
+INT PubKeyLen;
+CHAR ChatKey[DEFAULT_RSA_KETLEN];    // 对方的公钥
+VOID RSAinit() {
+	rsa = RSA_generate_key(DEFAULT_RSA_KETLEN, RSA_F4, NULL, NULL); // 生成密钥对
+
+	BIO* Pri = BIO_new(BIO_s_mem());
+	BIO* Pub = BIO_new(BIO_s_mem());
+
+	PEM_write_bio_RSAPrivateKey(Pri, rsa, NULL, NULL, 0, NULL, NULL);
+	PEM_write_bio_RSAPublicKey(Pub, rsa);
+
+	PriKeyLen = BIO_pending(Pri);
+	PubKeyLen = BIO_pending(Pub); // 获取密钥长度
+
+	PrivateKey = (CHAR*)malloc(PriKeyLen + 1);
+	PublicKey = (CHAR*)malloc(PubKeyLen + 1);
+
+	BIO_read(Pri, PrivateKey, PriKeyLen);
+	BIO_read(Pub, PublicKey, PubKeyLen);
+
+	PrivateKey[PriKeyLen] = '\0';
+	PublicKey[PubKeyLen] = '\0';
+
+	RSA_free(rsa);
+	BIO_free_all(Pub);
+	BIO_free_all(Pri);
+}
+
+// RSA公钥加密
+string RSA_PubKey_Encrypt(char* Buffer)
+{
+	CHAR* EncryptedText;
+	BIO* KeyBIO = BIO_new_file(ChatKey, "rb");
+	RSA* rsa = RSA_new();
+	rsa = PEM_read_bio_RSAPublicKey(KeyBIO, NULL, NULL, NULL);
+	if (!rsa) {
+		BIO_free_all(KeyBIO);
+		cerr << "RSA_PubKey_Encrypt failed" << endl;
+		return string("");
+	}
+
+	INT Len = RSA_size(rsa);
+	EncryptedText = (CHAR*)malloc(Len + 1);
+	ZeroMemory(EncryptedText,  Len + 1);
+	
+	INT iResult = RSA_public_encrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, rsa, RSA_PKCS1_PADDING);
+}
+
+VOID WINAPI Encrypt(CHAR* Buffer)
+{
+	INT Len = lstrlenA(Buffer);
+	CHAR Hash[SHA256_DIGEST_LENGTH];
+	strcpy_s(Hash, SHA256(Buffer).c_str());
+	
+}
+
+
+
+
+
 
 /*
 * CmdCheck：检查输入是否为客户端命令
@@ -38,6 +136,10 @@ HANDLE hChatThread[2]; // Reserver线程, Sender线程
 DWORD WINAPI CmdCheck(char* Txt) {
 	if (strcmp(Txt, ">exit") == 0)
 		return 1;
+	else if (strcmp(Txt, ">encrypt") == 0)
+		return 2;
+	else if (strcmp(Txt, ">cleartxt") == 0)
+		return 3;
 	return 0;
 }
 
@@ -85,17 +187,28 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 DWORD WINAPI Sender(LPVOID lpParam) {
 	SOCKET* ServerSocket = (SOCKET*)lpParam; // 服务器Socket
 	char Buffer[DEFAULT_BUFLEN]; // 发送缓存
-	int byteCount;
+	int byteCount, iResult;
 	while (*ServerSocket != INVALID_SOCKET) {
 		cin.getline(Buffer, DEFAULT_BUFLEN); // 一次读取一行
 
-		//TODO:添加加密信息
-
-		if (CmdCheck(Buffer)) {
+		iResult = CmdCheck(Buffer);
+		if (iResult == 1) { // 关闭客户端
 			shutdown(*ServerSocket, SD_SEND);
 			*ServerSocket = INVALID_SOCKET;
 			break;
 		}
+		else if (iResult == 2) {// 进入加密模式
+			RSAinit(); // 初始化RSA公密钥
+			send(*ServerSocket, PublicKey, PubKeyLen, 0); // 发送公钥
+			EncryptMode = TRUE; // 更新为加密发送模式
+			continue;
+		}
+		else if (iResult == 3) {
+			// 返回明文模式
+			continue;
+		}
+		if (EncryptMode == TRUE) 
+			Encrypt(Buffer);
 		byteCount = send(*ServerSocket, Buffer, (int)lstrlenA(Buffer) + 1, 0);
 		if (byteCount == SOCKET_ERROR) {
 			cerr << "send failed with Code: " << WSAGetLastError() << endl;
@@ -202,6 +315,7 @@ int main(int argc, char **argv) {
 	else {
 		cout << "Successfully connected to Server!" << endl;
 	}
+
 
 	// 发送试探信息
 	sprintf_s(Buffer, UserName);

@@ -444,7 +444,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 			if (ChatSocket != INVALID_SOCKET) {
 				Buffer[byteCount] = '\0';
 				ChatTxt = Buffer;
-				ChatTxt = ClientPortTransfer[atoi(ClientInfo.servstr)] + ": " + ChatTxt;
+				// ChatTxt = ClientPortTransfer[atoi(ClientInfo.servstr)] + ": " + ChatTxt; // 客户端加密通信时，不方便去除首部信息，故删除
 				if (LinkToServer.find(ChatSocket) != LinkToServer.end()) { // 送信前需检查对方是否还在线
 					byteCount = send(ChatSocket, ChatTxt.c_str(), (int)ChatTxt.length(), 0);
 					if (byteCount == SOCKET_ERROR) {
