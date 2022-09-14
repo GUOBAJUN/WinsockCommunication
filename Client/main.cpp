@@ -82,7 +82,7 @@ static const BYTE DH_P[] = {
 	0x48, 0xB6, 0xA3, 0xCC, 0x2E, 0x02, 0xA2, 0xF8, 
 	0x66, 0xB1, 0xD6, 0xEE, 0xDD, 0x36, 0xFB, 0xEB
 };
-static const BYTE DH_G[] = {0xEF};
+static const BYTE DH_G[] = { 2 };
 DH* dh;
 BIGNUM* dhP, * dhG;
 VOID DH_generate_key()
@@ -119,7 +119,12 @@ VOID DH_calc_shared_key(CHAR* peerHex)
 		return;
 	}
 	// 截断DH共享密钥为128位
-	
+	AESKeyLen = 16;
+	AESKey[AESKeyLen] = '\0';
+}
+
+DWORD WINAPI DH_Consult(SOCKET PeerSocket) {
+	return 0;
 }
 
 // RSA
@@ -296,16 +301,10 @@ VOID WINAPI Encrypt(CHAR* Buffer)
 * CmdCheck：检查输入是否为客户端命令
 * 参数：客户端输入的文本
 * >exit 断开与服务器的连接并关闭客户端
-* >encrypt 进入加密通信服务
-* >cleartext 进入明文通信服务
 */
 DWORD WINAPI CmdCheck(char* Txt) {
 	if (strcmp(Txt, ">exit") == 0)
 		return 1;
-	else if (strcmp(Txt, ">encrypt") == 0)
-		return 2;
-	else if (strcmp(Txt, ">cleartxt") == 0)
-		return 3;
 	return 0;
 }
 
@@ -362,16 +361,6 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 			shutdown(*ServerSocket, SD_SEND);
 			*ServerSocket = INVALID_SOCKET;
 			break;
-		}
-		else if (iResult == 2) {// 进入加密模式
-			RSAinit(); // 初始化RSA公密钥
-			send(*ServerSocket, PublicKey, PubKeyLen, 0); // 发送公钥
-			EncryptMode = TRUE; // 更新为加密发送模式
-			continue;
-		}
-		else if (iResult == 3) {
-			// 返回明文模式
-			continue;
 		}
 		if (EncryptMode == TRUE) 
 			Encrypt(Buffer);

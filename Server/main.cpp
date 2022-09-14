@@ -50,6 +50,7 @@ struct CmdInfo {
 
 map<string, SOCKET> ClientNameTransfer; // 用户名到Socket映射
 map<int, string> ClientPortTransfer;    // 用户端口到用户名映射
+map<SOCKET, SOCKET> ChatSockets;    // 客户端P2P映射
 set<SOCKET> LinkToServer;               // 连接到Server的Socket
 
 DWORD WINAPI ServerThread(LPVOID lpParam); // 为每一个客户端提供连接线程
@@ -285,7 +286,7 @@ DWORD WINAPI ServerThread(LPVOID lpParam)
 DWORD WINAPI ChatThread(LPVOID lpParam)
 {
 	SocketInfo ClientInfo = *(SocketInfo*)lpParam;
-	SOCKET ClientSocket = ClientInfo.Sockfd, ChatSocket = INVALID_SOCKET;
+	SOCKET ClientSocket = ClientInfo.Sockfd;
 	string UserName, ChatTxt;
 	char Buffer[DEFAULT_BUFLEN];
 	int byteCount;
@@ -294,7 +295,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 
 	//获取用户信息
 	if (ClientSocket != INVALID_SOCKET) {
-		byteCount = recv(ClientSocket, Buffer, DEFAULT_BUFLEN, 0); // 检查是否可以正常接受
+		byteCount = recv(ClientSocket, Buffer, DEFAULT_BUFLEN, 0); // 检查是否可以正常接
 		if (byteCount == SOCKET_ERROR) {
 			iResult = WSAGetLastError();
 			cerr << "recv failed with Code: " << iResult << endl;
@@ -310,6 +311,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 		}
 		// 将连接用户的名字与Socket和端口关联
 		UserName = Buffer;
+		ChatSockets[ClientSocket] = INVALID_SOCKET;              // 初始化聊天对象
 		ClientNameTransfer[UserName] = ClientSocket;
 		ClientPortTransfer[atoi(ClientInfo.servstr)] = UserName; // 建立映射
 		LinkToServer.insert(ClientSocket);                       // 将连接信息加入服务器统计
@@ -321,6 +323,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 			cerr << "send failed with Code: " << iResult << endl;
 			ClientNameTransfer.erase(UserName);
 			ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+			ChatSockets.erase(ClientSocket);
 			LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 			closesocket(ClientSocket);
 			return 1;
@@ -338,6 +341,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 				cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 			ClientNameTransfer.erase(UserName);
 			ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+			ChatSockets.erase(ClientSocket);
 			LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 			closesocket(ClientSocket);
 			return 1;
@@ -348,6 +352,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 				cerr << "shutdown failed with Code: " << WSAGetLastError() << endl;
 				ClientNameTransfer.erase(UserName);
 				ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+				ChatSockets.erase(ClientSocket);
 				LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 				closesocket(ClientSocket);
 				return 1;
@@ -355,6 +360,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 			cout << ClientPortTransfer[atoi(ClientInfo.servstr)] << " from Port " << ClientInfo.servstr << " exited successfully" << endl;
 			ClientNameTransfer.erase(UserName);
 			ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+			ChatSockets.erase(ClientSocket);
 			LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 			closesocket(ClientSocket);
 			ClientSocket = INVALID_SOCKET;
@@ -365,14 +371,14 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 			if (CmdCheck(Buffer)) { // 检查是否是来自客户端的命令
 				CmdResult = CmdCommit(Buffer);
 				if (CmdResult.cmd == "sendto") { // redirect命令
-					ChatSocket = CmdResult.ChatSocket;
-					if (ChatSocket != INVALID_SOCKET)
+					ChatSockets[ClientSocket] = CmdResult.ChatSocket;
+					if (ChatSockets[ClientSocket] != INVALID_SOCKET)
 					{
 						sprintf_s(Buffer, DEFAULT_BUFLEN, "Server: %s connected with You!", ClientPortTransfer[atoi(ClientInfo.servstr)].c_str());
-						byteCount = send(ChatSocket, Buffer, (int)strlen(Buffer) + 1, 0);
+						byteCount = send(ChatSockets[ClientSocket], Buffer, (int)strlen(Buffer) + 1, 0);
 						if (byteCount == SOCKET_ERROR) {
 							send(ClientSocket, "send failed and redirected to Server", 37, 0);
-							ChatSocket = INVALID_SOCKET;
+							ChatSockets[ClientSocket] = INVALID_SOCKET;
 						}
 						byteCount = send(ClientSocket, "Server: Redirected Successfully!", 33, 0);
 						if (byteCount == SOCKET_ERROR) {
@@ -382,10 +388,12 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 								cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 							ClientNameTransfer.erase(UserName);
 							ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+							ChatSockets.erase(ClientSocket);
 							LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 							closesocket(ClientSocket);
 							return 1;
 						}
+						ChatSockets[ChatSockets[ClientSocket]] = ClientSocket; // 反向重定向聊天
 					}
 					else {
 						if (strcmp(Buffer, "Server") == 0)
@@ -398,6 +406,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 									cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 								ClientNameTransfer.erase(UserName);
 								ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+								ChatSockets.erase(ClientSocket);
 								LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 								closesocket(ClientSocket);
 								return 1;
@@ -413,6 +422,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 									cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 								ClientNameTransfer.erase(UserName);
 								ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+								ChatSockets.erase(ClientSocket);
 								LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 								closesocket(ClientSocket);
 								return 1;
@@ -434,6 +444,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 							cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 						ClientNameTransfer.erase(UserName);
 						ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+						ChatSockets.erase(ClientSocket);
 						LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 						closesocket(ClientSocket);
 						return 1;
@@ -441,12 +452,13 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 				}
 				continue;
 			}
-			if (ChatSocket != INVALID_SOCKET) {
+			if (ChatSockets[ClientSocket] != INVALID_SOCKET) {
+				SOCKET tmpSocket = ChatSockets[ClientSocket];
 				Buffer[byteCount] = '\0';
 				ChatTxt = Buffer;
 				// ChatTxt = ClientPortTransfer[atoi(ClientInfo.servstr)] + ": " + ChatTxt; // 客户端加密通信时，不方便去除首部信息，故删除
-				if (LinkToServer.find(ChatSocket) != LinkToServer.end()) { // 送信前需检查对方是否还在线
-					byteCount = send(ChatSocket, ChatTxt.c_str(), (int)ChatTxt.length(), 0);
+				if (LinkToServer.find(tmpSocket) != LinkToServer.end()) { // 送信前需检查对方是否还在线
+					byteCount = send(tmpSocket, ChatTxt.c_str(), (int)ChatTxt.length(), 0);
 					if (byteCount == SOCKET_ERROR) {
 						send(ClientSocket, "send failed and redirected to Server", 37, 0);
 						if (byteCount == SOCKET_ERROR) {
@@ -456,11 +468,12 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 								cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 							ClientNameTransfer.erase(UserName);
 							ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+							ChatSockets.erase(ClientSocket);
 							LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 							closesocket(ClientSocket);
 							return 1;
 						}
-						ChatSocket = INVALID_SOCKET;
+						ChatSockets[ClientSocket] = INVALID_SOCKET;
 					}
 					// 对消息转发不进行检测
 				}
@@ -473,11 +486,12 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 							cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 						ClientNameTransfer.erase(UserName);
 						ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+						ChatSockets.erase(ClientSocket);
 						LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 						closesocket(ClientSocket);
 						return 1;
 					}
-					ChatSocket = INVALID_SOCKET;
+					ChatSockets[ClientSocket] = INVALID_SOCKET;
 				}
 			}
 
