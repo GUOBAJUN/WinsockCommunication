@@ -19,6 +19,7 @@
 #include <ctime>
 
 #include <openssl/bn.h>
+#include <openssl/dh.h>
 #include <openssl/aes.h>
 #include <openssl/sha.h>
 #include <openssl/rsa.h>
@@ -36,6 +37,9 @@
 #define DEFAULT_BUFLEN 4096
 #define UserNameLen 512
 #define DEFAULT_RSA_KETLEN 1024
+#define DEFAULT_AES_KEYLEN 128
+#define DEFAULT_DH_KEYLEN 512
+#define ALICE_MAGICNUM "2F08E400A3"
 
 using std::cin;
 using std::cout;
@@ -43,6 +47,7 @@ using std::cerr;
 using std::endl;
 using std::string;
 
+CHAR UserName[UserNameLen];
 HANDLE hChatThread[2]; // Reserver线程, Sender线程
 BOOL EncryptMode = FALSE;
 
@@ -62,7 +67,60 @@ string SHA256(char* Buffer) {
 	return Result;
 }
 
-// AES
+//AES128
+BYTE AESKey[128]; //实际上128位就几个字符
+INT AESKeyLen;
+
+// DH
+static const BYTE DH_P[] = {
+	0x1D, 0xF7, 0x7B, 0x3C, 0x8F, 0x4F, 0xAC, 0x75, 
+	0x34, 0x27, 0x24, 0x16, 0xA5, 0x53, 0x19, 0x63, 
+	0xED, 0x77, 0x19, 0xFC, 0x73, 0xB9, 0x61, 0xCE, 
+	0x05, 0xCF, 0x8D, 0x61, 0xB3, 0xA9, 0x08, 0x1A, 
+	0x4A, 0x89, 0xE7, 0x82, 0x88, 0x18, 0x70, 0x2A, 
+	0xB2, 0xA0, 0x66, 0x49, 0xFA, 0x42, 0xE8, 0x72, 
+	0x48, 0xB6, 0xA3, 0xCC, 0x2E, 0x02, 0xA2, 0xF8, 
+	0x66, 0xB1, 0xD6, 0xEE, 0xDD, 0x36, 0xFB, 0xEB
+};
+static const BYTE DH_G[] = {0xEF};
+DH* dh;
+BIGNUM* dhP, * dhG;
+VOID DH_generate_key()
+{
+	dh = DH_new();
+	dhP = BN_bin2bn(DH_P, sizeof(DH_P), NULL);
+	dhG = BN_bin2bn(DH_G, sizeof(DH_G), NULL);
+	if (dhP == NULL || dhG == NULL) {
+		cerr << "BN_bin2bn failed..." << endl;
+		DH_free(dh);
+		dh = NULL;
+		return;
+	}
+	DH_set0_pqg(dh, dhP, NULL, dhG);
+	if (strcmp(UserName, "Alice") == 0) { // Alice的私钥使用爱丽丝魔数
+		BIGNUM* Pub = BN_new();
+		BN_hex2bn(&Pub, ALICE_MAGICNUM);
+		DH_set0_key(dh, Pub, NULL);
+	}
+	if (DH_generate_key(dh) != 1) {
+		cerr << "DH_generate_key failed..." << endl;
+		return;
+	}
+}
+
+VOID DH_calc_shared_key(CHAR* peerHex)
+{
+	BIGNUM* peerKey;
+	peerKey = BN_new();
+	BN_hex2bn(&peerKey, peerHex);
+	AESKeyLen = DH_compute_key_padded(AESKey, peerKey, dh);
+	if (AESKeyLen == -1) {
+		cerr << "DH_compute_key_padded failed..." << endl;
+		return;
+	}
+	// 截断DH共享密钥为128位
+	
+}
 
 // RSA
 RSA *rsa;
@@ -70,7 +128,7 @@ CHAR* PrivateKey; // 我的私钥
 CHAR* PublicKey;  // 我的公钥
 INT PriKeyLen;
 INT PubKeyLen;
-CHAR ChatKey[DEFAULT_RSA_KETLEN];    // 对方的公钥
+CHAR RSAChatKey[DEFAULT_RSA_KETLEN];    // 对方的公钥
 VOID RSAinit() {
 	rsa = RSA_generate_key(DEFAULT_RSA_KETLEN, RSA_F4, NULL, NULL); // 生成密钥对
 
@@ -102,7 +160,7 @@ string RSA_PubKey_Encrypt(CHAR* Buffer)
 {
 	CHAR* EncryptedText;
 	string EncryptedStr;
-	BIO* KeyBIO = BIO_new_file(ChatKey, "rb");
+	BIO* KeyBIO = BIO_new_file(RSAChatKey, "rb");
 	if (!KeyBIO) {
 		cerr << "RSA_PubKey_Encrypt failed..." << endl;
 		return string("");
@@ -193,7 +251,7 @@ string RSA_PriKey_Sign(CHAR* Buffer) {
 string RSA_PubKey_Verify(CHAR* Buffer) {
 	CHAR* EncryptedText;
 	string ClearText;
-	BIO* KeyBIO = BIO_new_file(ChatKey, "rb");
+	BIO* KeyBIO = BIO_new_file(RSAChatKey, "rb");
 	if (!KeyBIO) {
 		cerr << "RSA_PubKey_Verify failed..." << endl;
 		return string("");
@@ -331,7 +389,7 @@ int main(int argc, char **argv) {
 	WSADATA wsaData;
 	SOCKET ConnectSocket = INVALID_SOCKET;
 	addrinfo* results = NULL, * ptr = NULL, hints;
-	char Buffer[DEFAULT_BUFLEN], hoststr[NI_MAXHOST], servstr[NI_MAXSERV], UserName[UserNameLen], Server[NI_MAXHOST];
+	char Buffer[DEFAULT_BUFLEN], hoststr[NI_MAXHOST], servstr[NI_MAXSERV], Server[NI_MAXHOST];
 	int iResult;
 
 	// 配置客户端参数
