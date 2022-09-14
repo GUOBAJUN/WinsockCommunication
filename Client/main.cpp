@@ -85,7 +85,7 @@ static const BYTE DH_P[] = {
 static const BYTE DH_G[] = { 2 };
 DH* dh;
 BIGNUM* dhP, * dhG;
-BOOL ActiveEncryt = FALSE;
+BOOL ActiveEncrypt = FALSE;
 DWORD WINAPI DH_generate_key()
 {
 	dh = DH_new();
@@ -132,12 +132,11 @@ DWORD WINAPI DH_Consult(SOCKET *ServerSocket) {
 	ZeroMemory(myPub, DEFAULT_BUFLEN);
 	ZeroMemory(peerPub, DEFAULT_BUFLEN);
 	iResult = DH_generate_key();
-	if (ActiveEncryt) { // 主动发起加密
+	if (ActiveEncrypt) { // 主动发起加密
 		SuspendThread(hChatThread[0]);                      // 由sender发起，暂停receiver线程
 		strcpy_s(myPub, BN_bn2hex(DH_get0_pub_key(dh)));
 		send(*ServerSocket, myPub, lstrlenA(myPub) + 1, 0); // 发送自己的公钥 Hex
 		recv(*ServerSocket, peerPub, DEFAULT_BUFLEN, 0);    // 接收Peer公钥 Hex
-		// ActiveEncryt = FALSE; // 标志重置(方便下一次连接使用)
 	}
 	else {
 		SuspendThread(hChatThread[1]);                      // 由receiver发起，暂停sender线程
@@ -146,6 +145,10 @@ DWORD WINAPI DH_Consult(SOCKET *ServerSocket) {
 		send(*ServerSocket, myPub, lstrlenA(myPub) + 1, 0); // 发送自己的公钥 Hex
 	}
 	DH_calc_shared_key(peerPub); // 计算AES128密钥
+	if (ActiveEncrypt)
+		ResumeThread(hChatThread[0]);
+	else
+		ResumeThread(hChatThread[1]); // 恢复全双工通信
 	return 0;
 }
 
@@ -324,10 +327,39 @@ VOID WINAPI MessageEncrypt(CHAR* Buffer)
 * 参数：客户端输入的文本
 * >exit 断开与服务器的连接并关闭客户端
 */
-DWORD WINAPI CmdCheck(char* Txt) {
-	if (strcmp(Txt, ">exit") == 0)
-		return 1;
-	return 0;
+DWORD WINAPI CmdCheck(char* txt) {
+	if (txt[0] != '<' && txt[0] != '>')
+		return 0;
+
+	INT txtLen = 0;
+	INT argc = 0;
+	string argv[10];
+	string unit;
+
+	txtLen = lstrlenA(txt);
+	for (int i = 0; i < txtLen; i++) {
+		if (txt[i] == ' ') {
+			argv[argc++] = unit;
+			unit.clear();
+			continue;
+		}
+		unit.push_back(txt[i]);
+	}
+	argv[argc++] = unit;
+	if (argv[0] == ">exit") return 1;
+	else if (argv[0] == "<sendto") return 2;
+	else return 0;
+}
+
+/*
+* msgCheck: 检查收信是否为加密请求
+* 参数：来自服务器转发的消息
+* Server：[UserName] is Connected to you!
+* Your friend has quit! And redirect to Server.
+* send failed and redirected to Server
+*/
+DWORD WINAPI msgCheck(char* txt) {
+
 }
 
 /*
@@ -354,6 +386,9 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 			*ServerSocket = INVALID_SOCKET;
 			break;
 		}
+
+
+
 		time(&Now);
 		localtime_s(&ptm, &Now);
 		strftime(strNow, DEFAULT_BUFLEN, "[%x %X] ", &ptm);
@@ -383,6 +418,19 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 			shutdown(*ServerSocket, SD_SEND);
 			*ServerSocket = INVALID_SOCKET;
 			break;
+		}
+		else if (iResult == 2) { // 聊天对象重定向 + 进入加密聊天
+			byteCount = send(*ServerSocket, Buffer, (int)lstrlenA(Buffer) + 1, 0);
+			if (byteCount == SOCKET_ERROR) {
+				cerr << "send failed with Code: " << WSAGetLastError() << endl;
+				*ServerSocket = INVALID_SOCKET;
+				return 1;
+			}
+			ActiveEncrypt = TRUE; // 标记为主动加密
+			DH_Consult(ServerSocket); // 与peer协商AES密钥
+			EncryptMode = TRUE; // 进入加密聊天模式
+			ActiveEncrypt = FALSE; // 协商完毕，标志复位
+			continue;
 		}
 		// 添加加密送信
 		byteCount = send(*ServerSocket, Buffer, (int)lstrlenA(Buffer) + 1, 0);
