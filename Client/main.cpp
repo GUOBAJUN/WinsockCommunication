@@ -85,7 +85,8 @@ static const BYTE DH_P[] = {
 static const BYTE DH_G[] = { 2 };
 DH* dh;
 BIGNUM* dhP, * dhG;
-VOID DH_generate_key()
+BOOL ActiveEncryt = FALSE;
+DWORD WINAPI DH_generate_key()
 {
 	dh = DH_new();
 	dhP = BN_bin2bn(DH_P, sizeof(DH_P), NULL);
@@ -94,7 +95,7 @@ VOID DH_generate_key()
 		cerr << "BN_bin2bn failed..." << endl;
 		DH_free(dh);
 		dh = NULL;
-		return;
+		return 1;
 	}
 	DH_set0_pqg(dh, dhP, NULL, dhG);
 	if (strcmp(UserName, "Alice") == 0) { // Alice的私钥使用爱丽丝魔数
@@ -104,11 +105,12 @@ VOID DH_generate_key()
 	}
 	if (DH_generate_key(dh) != 1) {
 		cerr << "DH_generate_key failed..." << endl;
-		return;
+		return 1;
 	}
+	return 0;
 }
 
-VOID DH_calc_shared_key(CHAR* peerHex)
+DWORD WINAPI DH_calc_shared_key(CHAR* peerHex)
 {
 	BIGNUM* peerKey;
 	peerKey = BN_new();
@@ -116,14 +118,34 @@ VOID DH_calc_shared_key(CHAR* peerHex)
 	AESKeyLen = DH_compute_key_padded(AESKey, peerKey, dh);
 	if (AESKeyLen == -1) {
 		cerr << "DH_compute_key_padded failed..." << endl;
-		return;
+		return 1;
 	}
 	// 截断DH共享密钥为128位
 	AESKeyLen = 16;
 	AESKey[AESKeyLen] = '\0';
+	return 0;
 }
 
-DWORD WINAPI DH_Consult(SOCKET PeerSocket) {
+DWORD WINAPI DH_Consult(SOCKET *ServerSocket) {
+	INT iResult;
+	CHAR myPub[DEFAULT_BUFLEN], peerPub[DEFAULT_BUFLEN];
+	ZeroMemory(myPub, DEFAULT_BUFLEN);
+	ZeroMemory(peerPub, DEFAULT_BUFLEN);
+	iResult = DH_generate_key();
+	if (ActiveEncryt) { // 主动发起加密
+		SuspendThread(hChatThread[0]);                      // 由sender发起，暂停receiver线程
+		strcpy_s(myPub, BN_bn2hex(DH_get0_pub_key(dh)));
+		send(*ServerSocket, myPub, lstrlenA(myPub) + 1, 0); // 发送自己的公钥 Hex
+		recv(*ServerSocket, peerPub, DEFAULT_BUFLEN, 0);    // 接收Peer公钥 Hex
+		// ActiveEncryt = FALSE; // 标志重置(方便下一次连接使用)
+	}
+	else {
+		SuspendThread(hChatThread[1]);                      // 由receiver发起，暂停sender线程
+		recv(*ServerSocket, peerPub, DEFAULT_BUFLEN, 0);    // 接收Peer公钥 Hex
+		strcpy_s(myPub, BN_bn2hex(DH_get0_pub_key(dh)));
+		send(*ServerSocket, myPub, lstrlenA(myPub) + 1, 0); // 发送自己的公钥 Hex
+	}
+	DH_calc_shared_key(peerPub); // 计算AES128密钥
 	return 0;
 }
 
@@ -282,7 +304,7 @@ string RSA_PubKey_Verify(CHAR* Buffer) {
 	return ClearText;
 }
 
-VOID WINAPI Encrypt(CHAR* Buffer)
+VOID WINAPI MessageEncrypt(CHAR* Buffer)
 {
 	INT Len = lstrlenA(Buffer);
 	CHAR Hash[SHA256_DIGEST_LENGTH];
@@ -362,8 +384,7 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 			*ServerSocket = INVALID_SOCKET;
 			break;
 		}
-		if (EncryptMode == TRUE) 
-			Encrypt(Buffer);
+		// 添加加密送信
 		byteCount = send(*ServerSocket, Buffer, (int)lstrlenA(Buffer) + 1, 0);
 		if (byteCount == SOCKET_ERROR) {
 			cerr << "send failed with Code: " << WSAGetLastError() << endl;
