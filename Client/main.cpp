@@ -29,6 +29,8 @@
 #pragma comment(lib, "libssl.lib")
 #pragma comment(lib, "libcrypto.lib")
 
+#pragma warning(disable: 4996)
+
 #define SERVER_PORT "10086"
 #define DEFAULT_SERVER "127.0.0.1"
 #define DEFAULT_BUFLEN 4096
@@ -101,6 +103,10 @@ string RSA_PubKey_Encrypt(CHAR* Buffer)
 	CHAR* EncryptedText;
 	string EncryptedStr;
 	BIO* KeyBIO = BIO_new_file(ChatKey, "rb");
+	if (!KeyBIO) {
+		cerr << "RSA_PubKey_Encrypt failed..." << endl;
+		return string("");
+	}
 	RSA* rsa = RSA_new();
 	rsa = PEM_read_bio_RSAPublicKey(KeyBIO, NULL, NULL, NULL);
 	if (!rsa) {
@@ -123,11 +129,15 @@ string RSA_PubKey_Encrypt(CHAR* Buffer)
 }
 
 // RSA私钥解密
-string RSA_Pri_Decrypt(CHAR* Buffer)
+string RSA_PriKey_Decrypt(CHAR* Buffer)
 {
 	CHAR* EncryptedText;
 	string ClearText;
 	BIO* KeyBIO = BIO_new_file(PrivateKey, "rb");
+	if (!KeyBIO) {
+		cerr << "RSA_Pri_Decrypt failed..." << endl;
+		return string("");
+	}
 	RSA* rsa = RSA_new();
 	rsa = PEM_read_bio_RSAPrivateKey(KeyBIO, NULL, NULL, NULL);
 	if (!rsa) {
@@ -147,15 +157,76 @@ string RSA_Pri_Decrypt(CHAR* Buffer)
 	BIO_free_all(KeyBIO);
 	RSA_free(rsa);
 	return ClearText;
+}
 
+// RSA私钥签名
+string RSA_PriKey_Sign(CHAR* Buffer) {
+	CHAR* EncryptedText;
+	string EncryptedStr;
+	BIO* KeyBIO = BIO_new_file(PrivateKey, "rb");
+	if (!KeyBIO) {
+		cerr << "RSA_PriKey_Sign failed..." << endl;
+		return string("");
+	}
+	RSA* rsa = RSA_new();
+	rsa = PEM_read_bio_RSAPublicKey(KeyBIO, NULL, NULL, NULL);
+	if (!rsa) {
+		BIO_free_all(KeyBIO);
+		cerr << "RSA_PriKey_Sign failed..." << endl;
+		return string("");
+	}
+
+	INT Len = RSA_size(rsa);
+	EncryptedText = (CHAR*)malloc(Len + 1);
+	ZeroMemory(EncryptedText, Len + 1);
+
+	INT iResult = RSA_public_encrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
+	if (iResult >= 0)
+		EncryptedStr = string(EncryptedText, iResult);
+	free(EncryptedText);
+	BIO_free_all(KeyBIO);
+	RSA_free(rsa);
+	return EncryptedStr;
+}
+
+// RSA公钥验签
+string RSA_PubKey_Verify(CHAR* Buffer) {
+	CHAR* EncryptedText;
+	string ClearText;
+	BIO* KeyBIO = BIO_new_file(ChatKey, "rb");
+	if (!KeyBIO) {
+		cerr << "RSA_PubKey_Verify failed..." << endl;
+		return string("");
+	}
+	RSA* rsa = RSA_new();
+	rsa = PEM_read_bio_RSAPrivateKey(KeyBIO, NULL, NULL, NULL);
+	if (!rsa) {
+		cerr << "RSA_PubKey_Verify failed..." << endl;
+		BIO_free_all(KeyBIO);
+		RSA_free(rsa);
+		return string("");
+	}
+	INT Len = RSA_size(rsa);
+	EncryptedText = (CHAR*)malloc(Len + 1);
+	ZeroMemory(EncryptedText, Len + 1);
+
+	INT iResult = RSA_private_decrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
+	if (iResult >= 0)
+		ClearText = string(EncryptedText, iResult);
+	free(EncryptedText);
+	BIO_free_all(KeyBIO);
+	RSA_free(rsa);
+	return ClearText;
 }
 
 VOID WINAPI Encrypt(CHAR* Buffer)
 {
 	INT Len = lstrlenA(Buffer);
 	CHAR Hash[SHA256_DIGEST_LENGTH];
-	strcpy_s(Hash, SHA256(Buffer).c_str());
-	
+	CHAR msg[DEFAULT_BUFLEN] = "";
+	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256
+	strcpy_s(msg, RSA_PriKey_Sign(Hash).c_str()); // 对SHA256签名
+	strcat_s(msg, Buffer); // 为消息添加签名后的SHA256首部
 }
 
 
@@ -166,7 +237,9 @@ VOID WINAPI Encrypt(CHAR* Buffer)
 /*
 * CmdCheck：检查输入是否为客户端命令
 * 参数：客户端输入的文本
-* 当前只存在退出(>exit)命令
+* >exit 断开与服务器的连接并关闭客户端
+* >encrypt 进入加密通信服务
+* >cleartext 进入明文通信服务
 */
 DWORD WINAPI CmdCheck(char* Txt) {
 	if (strcmp(Txt, ">exit") == 0)
