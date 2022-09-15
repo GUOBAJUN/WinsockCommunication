@@ -17,6 +17,7 @@
 #include <iostream>
 #include <cstring>
 #include <ctime>
+#include <cctype>
 
 #include <openssl/bn.h>
 #include <openssl/dh.h>
@@ -54,6 +55,40 @@ CHAR redirectSelf[UserNameLen];
 HANDLE hChatThread[2]; // Reserver线程, Sender线程
 BOOL EncryptMode = FALSE;
 
+// Universal
+VOID Bin2Hex(BYTE* Buffer, CHAR* msg,INT Len)
+{
+	string result;
+	CHAR buf[3];
+	for (INT i = 0; i < Len; i++) {
+		sprintf_s(buf, "%02x", Buffer[i]);
+		result += buf;
+	}
+	strcpy(msg, result.c_str());
+}
+
+BYTE Hex2Dec(CHAR* hex)
+{
+	BYTE res = 0;
+	if (isdigit(hex[0])) res += (hex[0] - '0') * 16;
+	else res += (hex[0] - 'a' + 10) * 16;
+	if (isdigit(hex[1])) res += (hex[1] - '0');
+	else res += (hex[1] - 'a' + 10);
+	return res;
+}
+
+VOID Hex2Bin(CHAR* Buffer, BYTE* msg, INT* Len) {
+	INT HexLen = lstrlenA(Buffer), cnt = 0;
+	CHAR buf[3]= "";
+	*Len = HexLen / 2;
+	msg = (BYTE*)malloc(*Len);
+	for (INT i = 0; i < HexLen; i += 2) {
+		buf[0] = Buffer[i];
+		buf[1] = Buffer[i + 1];
+		msg[cnt++] = Hex2Dec(buf);
+	}
+}
+
 // SHA256
 string SHA256(char* Buffer) {
 	string txt = Buffer, Result;
@@ -86,6 +121,65 @@ DWORD WINAPI AESInit()
 	if (iResult != 0) {
 		cerr << "AES_set_decrypt_key failed with Code: " << iResult << endl;
 		return 1;
+	}
+	return 0;
+}
+
+DWORD AES_ECB_Encrypt_ZeroPadding(unsigned char* in, unsigned char* out, INT inLen)
+{
+	BYTE Zero[16];
+	BYTE inTmp[1024] = "", outTmp[1024] = "";
+	INT rest, round;
+	ZeroMemory(Zero, 16);
+	if (inLen <= 16) {
+		AES_ecb_encrypt(in, out, &KeyE, AES_ENCRYPT);
+	}
+	else {
+		rest = inLen % 16;
+		round = (inLen - rest) / 16;
+		memcpy(inTmp, in, 1024);
+		strcat((CHAR*)inTmp, (CHAR*)Zero);
+		memcpy(in, inTmp, (round + 1) * 16);// zero padding
+		for (INT i = 0; i < round + 1; i++) { // 分组加密并拼接密文
+			memcpy(inTmp, in + 16 * i, 16);
+			AES_ecb_encrypt(inTmp, outTmp, &KeyE, AES_ENCRYPT);
+			memcpy(out + 16 * i, outTmp, 16);
+			ZeroMemory(inTmp, 1024);
+			ZeroMemory(outTmp, 1024);
+		}
+	}
+	return 0;
+}
+
+DWORD AES_EBC_Decrypt_ZeroPadding(const BYTE* in , BYTE* out, INT inLen)
+{
+	INT rest = 0, round, cnt = 0, ret = 0;
+	BYTE inTmp[1024] = "", outTmp[1024] = "";
+	if (inLen == 16) {
+		AES_ecb_encrypt(in, out, &KeyD, AES_DECRYPT);
+	}
+	else {
+		round = inLen / 16;
+		for (INT i = 0, j; i < round; i++) {
+			if (i == round - 1) {
+				memcpy(inTmp, in + 16 * i, 16);
+				AES_ecb_encrypt(inTmp, outTmp, &KeyD, AES_DECRYPT);
+				for (j = 0; j < 16; j++) {
+					if (outTmp[j] == '\0') {
+						ret = 16 - j;
+						break;
+					}
+				}
+				memcpy(out + 16 * i, outTmp, ret);
+			}
+			else {
+				memcpy(inTmp, in + 16 * i, 16);
+				AES_ecb_encrypt(inTmp, outTmp, &KeyD, AES_DECRYPT);
+				memcpy(out + 16 * i, outTmp, 16);
+				ZeroMemory(inTmp, 1024);
+				ZeroMemory(outTmp, 1024);
+			}
+		}
 	}
 	return 0;
 }
@@ -332,36 +426,40 @@ DWORD WINAPI KeyConsult(SOCKET *ServerSocket) {
 }
 
 // 综合信息加密
-VOID WINAPI MessageEncrypt(CHAR* Buffer, CHAR* mLen)
+VOID WINAPI MessageEncrypt(CHAR* Buffer,CHAR*oLen, CHAR* mLen)
 {
-	INT Len = lstrlenA(Buffer);
+	INT Len = lstrlenA(Buffer); // 原始信息长度
 	CHAR Hash[DEFAULT_HASHLEN] = "";
 	CHAR msg[DEFAULT_BUFLEN] = "";
-	itoa(Len, mLen, 10); // 原始信息长度
+	string SignedHash;
+	itoa(Len, oLen, 10); // 原始信息长度转换为字符串
 	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256
-	strcpy_s(msg, RSA_PriKey_Sign(Hash).c_str()); // 对SHA256签名
+	SignedHash = RSA_PriKey_Sign(Hash);
+	strcpy_s(msg, SignedHash.c_str()); // 对SHA256签名
 	strcat_s(msg, Buffer); // 为消息添加签名后的SHA256首部
-	// 需要封装AES，改为分块循环加密 解密同理
-	AES_ecb_encrypt((BYTE*)msg, (BYTE*)Buffer, &KeyE, AES_ENCRYPT); // AES加密，结果存储在Buffer中
+	itoa(Len + SignedHash.length(), mLen, 10);
+	AES_ECB_Encrypt_ZeroPadding((BYTE*)msg, (BYTE*)Buffer, Len + SignedHash.length());// AES加密，结果存储在Buffer中
+	// 将密文转换为HEX格式
 }
 
 // 综合信息解密
-VOID WINAPI MesssageDecrypt(CHAR* Buffer, INT mLen)
+VOID WINAPI MesssageDecrypt(CHAR* Buffer,INT oLen, INT mLen)
 {
 	CHAR msg[DEFAULT_BUFLEN] = "";
-	CHAR Hash[DEFAULT_HASHLEN] = "";
+	string verHash;
 	INT i, Len, bufLen = 0;
 	string vResult;
-	AES_ecb_encrypt((BYTE*)Buffer, (BYTE*)msg, &KeyD, AES_DECRYPT); // AES解密，结果存储在msg中
+	// 将密文转换为BIN格式
+	AES_EBC_Decrypt_ZeroPadding((BYTE*)Buffer, (BYTE*)msg, mLen);// AES解密，结果存储在msg中
 	Len = lstrlenA(msg);
-	for (i = Len - mLen - 1; i < Len; i++) {// 提取原始消息
+	for (i = Len - oLen; i < Len; i++) {// 提取原始消息
 		Buffer[bufLen++] = msg[i];
 	}
 	Buffer[bufLen] = '\0';      // 截断为原始信息 -> 返回到Receiver
-	msg[Len - mLen - 1] = '\0'; // 截断为签名后的SHA256
-	SHA256(Hash);               // 计算收信摘要
+	msg[Len - oLen] = '\0';    // 截断为签名后的SHA256
+	verHash = SHA256(msg);               // 计算收信摘要
 	vResult = RSA_PubKey_Verify(msg); // 验证签名 获得SHA256
-	if (vResult != Hash) {
+	if (vResult != verHash) {
 		cerr << "Warning: The Message you've received may be modified..." << endl;
 	}
 }
@@ -445,10 +543,29 @@ DWORD WINAPI msgCheck(char* txt) {
 	if (argc == 5 && argv[2] == "connected" && argv[1] != UserName) return 1;
 	else if (argc == 8 && argv[1] == "friend") return 2;
 	else if (argc == 6 && argv[3] == "redirected") return 2;
-	else if (argc == 2 && argv[1] == "mLen") { 
-		strcpy(txt, argv[0].c_str()); // 将原始信息长度回传
-		return 3; 
+	else if (argc == 4 && argv[0] == "oLen" && argv[2] == "mLen") return 3; 
+	return 0;
+}
+
+DWORD GetOMLen(CHAR* txt, INT* oLen, INT* mLen) {
+	INT txtLen = 0;
+	INT argc = 0;
+	string argv[10];
+	string unit;
+
+	txtLen = lstrlenA(txt);
+	for (int i = 0; i < txtLen; i++) {
+		if (argc > 8) return 0;
+		if (txt[i] == ' ') {
+			argv[argc++] = unit;
+			unit.clear();
+			continue;
+		}
+		unit.push_back(txt[i]);
 	}
+	argv[argc++] = unit;
+	*oLen = atoi(argv[1].c_str());
+	*mLen = atoi(argv[3].c_str()); // 从先行报文中获取 原始信息长度oLen和加密后信息长度mLen
 	return 0;
 }
 
@@ -460,7 +577,7 @@ DWORD WINAPI msgCheck(char* txt) {
 DWORD WINAPI Receiver(LPVOID lpParam) {
 	SOCKET *ServerSocket = (SOCKET*)lpParam; // 服务器Socket
 	CHAR Buffer[DEFAULT_BUFLEN], strNow[DEFAULT_BUFLEN]; // 接收缓存、时间戳
-	INT byteCount, iResult, mLen;
+	INT byteCount, iResult, mLen, oLen;
 	time_t Now;
 	struct tm ptm;
 	while (*ServerSocket != INVALID_SOCKET) {
@@ -498,9 +615,9 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 			CleanEncrypt();
 		}
 		else if (iResult == 3) {
-			mLen = atoi(Buffer); // 经过处理后Buffer已经变为原始信息长度
+			GetOMLen(Buffer, &oLen, &mLen); // 经过处理后Buffer已经变为原始信息长度
 			byteCount = recv(*ServerSocket, Buffer, DEFAULT_BUFLEN, 0); // 接收加密信息
-			MesssageDecrypt(Buffer, mLen);
+			MesssageDecrypt(Buffer,oLen, mLen);
 			time(&Now);
 			localtime_s(&ptm, &Now);
 			strftime(strNow, DEFAULT_BUFLEN, "[%x %X] ", &ptm);
@@ -518,7 +635,8 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 DWORD WINAPI Sender(LPVOID lpParam) {
 	SOCKET* ServerSocket = (SOCKET*)lpParam; // 服务器Socket
 	CHAR Buffer[DEFAULT_BUFLEN]; // 发送缓存
-	CHAR mLen[128]; // 送信长度[十进制数字]
+	CHAR mLen[128], oLen[128]; // 送信长度(十进制数字)
+	string hint;
 	INT byteCount, iResult;
 	while (*ServerSocket != INVALID_SOCKET) {
 		ZeroMemory(Buffer, DEFAULT_BUFLEN);
@@ -533,7 +651,7 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 		else if (iResult == 2) { // 聊天对象重定向 + 清除已有密钥 + 进入加密聊天
 			CleanEncrypt(); 
 			if (strcmp(Buffer, "<sendto Server") == 0 || strcmp(Buffer, redirectSelf) == 0) { // 重定向到Server | Self， 无需加密
-				byteCount = send(*ServerSocket, Buffer, (int)lstrlenA(Buffer) + 1, 0);
+				byteCount = send(*ServerSocket, Buffer, lstrlenA(Buffer) + 1, 0);
 				if (byteCount == SOCKET_ERROR) {
 					cerr << "send failed with Code: " << WSAGetLastError() << endl;
 					*ServerSocket = INVALID_SOCKET;
@@ -541,7 +659,7 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 				}
 			}
 			else { // 重定向到有效peer
-				byteCount = send(*ServerSocket, Buffer, (int)lstrlenA(Buffer) + 1, 0);
+				byteCount = send(*ServerSocket, Buffer, lstrlenA(Buffer) + 1, 0);
 				if (byteCount == SOCKET_ERROR) {
 					cerr << "send failed with Code: " << WSAGetLastError() << endl;
 					*ServerSocket = INVALID_SOCKET;
@@ -555,11 +673,15 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 			}
 		}
 		if (EncryptMode) {
-			MessageEncrypt(Buffer, mLen);                     // 加密原始信息，并返回原始信息长度
-			strcat_s(mLen, " mLen");                          // 给予Peer一个Hint
-			send(*ServerSocket, mLen, lstrlenA(mLen) + 1, 0); // 加密模式下明文传输原始信息长度
+			MessageEncrypt(Buffer, oLen, mLen);                     // 加密原始信息，并返回原始信息长度
+			hint.clear();
+			hint.append("oLen ");
+			hint.append(oLen);
+			hint.append(" mLen ");
+			hint.append(mLen);// 给予Peer一个Hint
+			send(*ServerSocket, hint.c_str(), hint.length(), 0); // 加密模式下明文传输原始信息长度
 		}
-		byteCount = send(*ServerSocket, Buffer, lstrlenA(Buffer) + 1, 0);
+		byteCount = send(*ServerSocket, Buffer, atoi(mLen), 0);
 		if (byteCount == SOCKET_ERROR) {
 			cerr << "send failed with Code: " << WSAGetLastError() << endl;
 			*ServerSocket = INVALID_SOCKET;
