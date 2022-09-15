@@ -48,6 +48,7 @@ using std::endl;
 using std::string;
 
 CHAR UserName[UserNameLen];
+CHAR redirectSelf[UserNameLen];
 HANDLE hChatThread[2]; // Reserver线程, Sender线程
 BOOL EncryptMode = FALSE;
 
@@ -72,16 +73,7 @@ BYTE AESKey[128]; //实际上128位就几个字符
 INT AESKeyLen;
 
 // DH
-static const BYTE DH_P[] = {
-	0x1D, 0xF7, 0x7B, 0x3C, 0x8F, 0x4F, 0xAC, 0x75, 
-	0x34, 0x27, 0x24, 0x16, 0xA5, 0x53, 0x19, 0x63, 
-	0xED, 0x77, 0x19, 0xFC, 0x73, 0xB9, 0x61, 0xCE, 
-	0x05, 0xCF, 0x8D, 0x61, 0xB3, 0xA9, 0x08, 0x1A, 
-	0x4A, 0x89, 0xE7, 0x82, 0x88, 0x18, 0x70, 0x2A, 
-	0xB2, 0xA0, 0x66, 0x49, 0xFA, 0x42, 0xE8, 0x72, 
-	0x48, 0xB6, 0xA3, 0xCC, 0x2E, 0x02, 0xA2, 0xF8, 
-	0x66, 0xB1, 0xD6, 0xEE, 0xDD, 0x36, 0xFB, 0xEB
-};
+static const CHAR DH_P[] = "EBFB36DDEED6B166F8A2022ECCA3B64872E842FA4966A0B22A70188882E7894A1A08A9B3618DCF05CE61B973FC1977ED631953A51624273475AC4F8F3C7BF71D";
 static const BYTE DH_G[] = { 2 };
 DH* dh;
 BIGNUM* dhP, * dhG;
@@ -89,7 +81,8 @@ BOOL ActiveEncrypt = FALSE;
 DWORD WINAPI DH_generate_key()
 {
 	dh = DH_new();
-	dhP = BN_bin2bn(DH_P, sizeof(DH_P), NULL);
+	dhP = BN_new();
+	BN_hex2bn(&dhP, DH_P);
 	dhG = BN_bin2bn(DH_G, sizeof(DH_G), NULL);
 	if (dhP == NULL || dhG == NULL) {
 		cerr << "BN_bin2bn failed..." << endl;
@@ -126,39 +119,14 @@ DWORD WINAPI DH_calc_shared_key(CHAR* peerHex)
 	return 0;
 }
 
-DWORD WINAPI DH_Consult(SOCKET *ServerSocket) {
-	INT iResult;
-	CHAR myPub[DEFAULT_BUFLEN], peerPub[DEFAULT_BUFLEN];
-	ZeroMemory(myPub, DEFAULT_BUFLEN);
-	ZeroMemory(peerPub, DEFAULT_BUFLEN);
-	iResult = DH_generate_key();
-	if (ActiveEncrypt) { // 主动发起加密
-		SuspendThread(hChatThread[0]);                      // 由sender发起，暂停receiver线程
-		strcpy_s(myPub, BN_bn2hex(DH_get0_pub_key(dh)));
-		send(*ServerSocket, myPub, lstrlenA(myPub) + 1, 0); // 发送自己的公钥 Hex
-		recv(*ServerSocket, peerPub, DEFAULT_BUFLEN, 0);    // 接收Peer公钥 Hex
-	}
-	else {
-		SuspendThread(hChatThread[1]);                      // 由receiver发起，暂停sender线程
-		recv(*ServerSocket, peerPub, DEFAULT_BUFLEN, 0);    // 接收Peer公钥 Hex
-		strcpy_s(myPub, BN_bn2hex(DH_get0_pub_key(dh)));
-		send(*ServerSocket, myPub, lstrlenA(myPub) + 1, 0); // 发送自己的公钥 Hex
-	}
-	DH_calc_shared_key(peerPub); // 计算AES128密钥
-	if (ActiveEncrypt)
-		ResumeThread(hChatThread[0]);
-	else
-		ResumeThread(hChatThread[1]); // 恢复全双工通信
-	return 0;
-}
 
 // RSA
 RSA *rsa;
-CHAR* PrivateKey; // 我的私钥
-CHAR* PublicKey;  // 我的公钥
+CHAR* PrivateKey; // 我的RSA私钥
+CHAR* PublicKey;  // 我的RSA公钥
 INT PriKeyLen;
 INT PubKeyLen;
-CHAR RSAChatKey[DEFAULT_RSA_KETLEN];    // 对方的公钥
+CHAR RSAChatKey[DEFAULT_RSA_KETLEN];    // 对方的RSA公钥
 VOID RSAinit() {
 	rsa = RSA_generate_key(DEFAULT_RSA_KETLEN, RSA_F4, NULL, NULL); // 生成密钥对
 
@@ -307,6 +275,40 @@ string RSA_PubKey_Verify(CHAR* Buffer) {
 	return ClearText;
 }
 
+// 密钥交换
+DWORD WINAPI KeyConsult(SOCKET *ServerSocket) {
+	INT iResult, byteCount;
+	CHAR myPub[DEFAULT_BUFLEN], peerPub[DEFAULT_BUFLEN];
+	ZeroMemory(myPub, DEFAULT_BUFLEN);
+	ZeroMemory(peerPub, DEFAULT_BUFLEN);
+	RSAinit(); // 生成本客户端的RSA密钥
+	iResult = DH_generate_key(); // 生成本客户端的DH密钥
+	if (ActiveEncrypt) { // 主动发起加密
+		SuspendThread(hChatThread[0]);                      // 由sender发起，暂停receiver线程
+		strcpy_s(myPub, BN_bn2hex(DH_get0_pub_key(dh)));
+		byteCount = send(*ServerSocket, myPub, lstrlenA(myPub) + 1, 0); // 发送自己的DH公钥 Hex
+		byteCount = recv(*ServerSocket, peerPub, DEFAULT_BUFLEN, 0);    // 接收PeerDH公钥 Hex
+		byteCount = send(*ServerSocket, PublicKey, DEFAULT_RSA_KETLEN, 0); // 发送自己的RSA公钥
+		byteCount = recv(*ServerSocket, RSAChatKey, DEFAULT_RSA_KETLEN, 0); // 接收peer的RSA公钥
+	}
+	else {
+		SuspendThread(hChatThread[1]);                      // 由receiver发起，暂停sender线程
+		byteCount = recv(*ServerSocket, peerPub, DEFAULT_BUFLEN, 0);    // 接收PeerDH公钥 Hex
+		strcpy_s(myPub, BN_bn2hex(DH_get0_pub_key(dh)));
+		byteCount = send(*ServerSocket, "Chat Encrypted", 15, 0); // 结束Peer的Receiver的recv函数
+		byteCount = send(*ServerSocket, myPub, lstrlenA(myPub) + 1, 0); // 发送自己的DH公钥 Hex
+		byteCount = recv(*ServerSocket, RSAChatKey, DEFAULT_RSA_KETLEN, 0); // 接收peer的RSA公钥
+		byteCount = send(*ServerSocket, PublicKey, DEFAULT_RSA_KETLEN, 0); //发送自己的RSA公钥
+	}
+	DH_calc_shared_key(peerPub); // 计算AES128密钥
+	if (ActiveEncrypt)
+		ResumeThread(hChatThread[0]);
+	else
+		ResumeThread(hChatThread[1]); // 恢复全双工通信
+	return 0;
+}
+
+// 综合信息加密
 VOID WINAPI MessageEncrypt(CHAR* Buffer)
 {
 	INT Len = lstrlenA(Buffer);
@@ -315,6 +317,20 @@ VOID WINAPI MessageEncrypt(CHAR* Buffer)
 	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256
 	strcpy_s(msg, RSA_PriKey_Sign(Hash).c_str()); // 对SHA256签名
 	strcat_s(msg, Buffer); // 为消息添加签名后的SHA256首部
+}
+
+// 清除加密凭证
+VOID WINAPI CleanEncrypt()
+{
+	if (!EncryptMode) return; // 非加密状态，无需清理
+	free(PrivateKey);
+	free(PublicKey);
+	PrivateKey = NULL;
+	PublicKey = NULL; // 清除RSA密钥
+	DH_free(dh); // 清除DH密钥
+	ZeroMemory(AESKey, DEFAULT_AES_KEYLEN);
+	AESKeyLen = 0; // 清除AES密钥
+	EncryptMode = FALSE;
 }
 
 
@@ -354,12 +370,34 @@ DWORD WINAPI CmdCheck(char* txt) {
 /*
 * msgCheck: 检查收信是否为加密请求
 * 参数：来自服务器转发的消息
-* Server：[UserName] is Connected to you!
+* Server: [%s] connected with You!
 * Your friend has quit! And redirect to Server.
 * send failed and redirected to Server
+* return 0 无特殊含义
+* return 1 进入加密
+* return 2 退出加密
 */
 DWORD WINAPI msgCheck(char* txt) {
+	INT txtLen = 0;
+	INT argc = 0;
+	string argv[10];
+	string unit;
 
+	txtLen = lstrlenA(txt);
+	for (int i = 0; i < txtLen; i++) {
+		if (argc > 8) return 0;
+		if (txt[i] == ' ') {
+			argv[argc++] = unit;
+			unit.clear();
+			continue;
+		}
+		unit.push_back(txt[i]);
+	}
+	argv[argc++] = unit;
+	if (argc == 5 && argv[2] == "connected" && argv[1] != UserName) return 1;
+	else if (argc == 8 && argv[1] == "friend") return 2;
+	else if (argc == 6 && argv[3] == "redirected") return 2;
+	return 0;
 }
 
 /*
@@ -369,11 +407,12 @@ DWORD WINAPI msgCheck(char* txt) {
 */
 DWORD WINAPI Receiver(LPVOID lpParam) {
 	SOCKET *ServerSocket = (SOCKET*)lpParam; // 服务器Socket
-	char Buffer[DEFAULT_BUFLEN], strNow[DEFAULT_BUFLEN]; // 接收缓存、时间戳
-	int byteCount;
+	CHAR Buffer[DEFAULT_BUFLEN], strNow[DEFAULT_BUFLEN]; // 接收缓存、时间戳
+	INT byteCount, iResult;
 	time_t Now;
 	struct tm ptm;
 	while (*ServerSocket != INVALID_SOCKET) {
+		ZeroMemory(Buffer, DEFAULT_BUFLEN);
 		byteCount = recv(*ServerSocket, Buffer, DEFAULT_BUFLEN, 0);
 		if (byteCount == SOCKET_ERROR) {
 			cerr << "recv failed with Code: " << WSAGetLastError() << endl;
@@ -386,17 +425,27 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 			*ServerSocket = INVALID_SOCKET;
 			break;
 		}
-
-
-
-		time(&Now);
-		localtime_s(&ptm, &Now);
-		strftime(strNow, DEFAULT_BUFLEN, "[%x %X] ", &ptm);
-		Buffer[byteCount] = '\0';
-
-		//TODO:添加解密
-
-		cout << strNow << Buffer << endl;
+		iResult = msgCheck(Buffer);
+		if(iResult == 0) {  // 常规信息
+			time(&Now);
+			localtime_s(&ptm, &Now);
+			strftime(strNow, DEFAULT_BUFLEN, "[%x %X] ", &ptm);
+			Buffer[byteCount] = '\0';
+			//TODO: 解密
+			cout << strNow << Buffer << endl;
+		}
+		else if (iResult == 1) { // 进入加密模式
+			time(&Now);
+			localtime_s(&ptm, &Now);
+			strftime(strNow, DEFAULT_BUFLEN, "[%x %X] ", &ptm);
+			Buffer[byteCount] = '\0';
+			cout << strNow << Buffer << endl; // 输出服务器的明文通告
+			KeyConsult(ServerSocket); // 与Peer协商密钥
+			EncryptMode = TRUE;  // 被动加密
+		}
+		else if (iResult == 2) { // 明文模式（与服务器直接连接）
+			CleanEncrypt();
+		}
 	}
 	return 0;
 }
@@ -411,26 +460,39 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 	char Buffer[DEFAULT_BUFLEN]; // 发送缓存
 	int byteCount, iResult;
 	while (*ServerSocket != INVALID_SOCKET) {
+		ZeroMemory(Buffer, DEFAULT_BUFLEN);
 		cin.getline(Buffer, DEFAULT_BUFLEN); // 一次读取一行
 
 		iResult = CmdCheck(Buffer);
 		if (iResult == 1) { // 关闭客户端
+			CleanEncrypt(); // 销毁加密凭证
 			shutdown(*ServerSocket, SD_SEND);
 			*ServerSocket = INVALID_SOCKET;
 			break;
 		}
-		else if (iResult == 2) { // 聊天对象重定向 + 进入加密聊天
-			byteCount = send(*ServerSocket, Buffer, (int)lstrlenA(Buffer) + 1, 0);
-			if (byteCount == SOCKET_ERROR) {
-				cerr << "send failed with Code: " << WSAGetLastError() << endl;
-				*ServerSocket = INVALID_SOCKET;
-				return 1;
+		else if (iResult == 2) { // 聊天对象重定向 + 清除已有密钥 + 进入加密聊天
+			CleanEncrypt(); 
+			if (strcmp(Buffer, "<sendto Server") == 0 || strcmp(Buffer, redirectSelf) == 0) { // 重定向到Server | Self， 无需加密
+				byteCount = send(*ServerSocket, Buffer, (int)lstrlenA(Buffer) + 1, 0);
+				if (byteCount == SOCKET_ERROR) {
+					cerr << "send failed with Code: " << WSAGetLastError() << endl;
+					*ServerSocket = INVALID_SOCKET;
+					return 1;
+				}
 			}
-			ActiveEncrypt = TRUE; // 标记为主动加密
-			DH_Consult(ServerSocket); // 与peer协商AES密钥
-			EncryptMode = TRUE; // 进入加密聊天模式
-			ActiveEncrypt = FALSE; // 协商完毕，标志复位
-			continue;
+			else { // 重定向到有效peer
+				byteCount = send(*ServerSocket, Buffer, (int)lstrlenA(Buffer) + 1, 0);
+				if (byteCount == SOCKET_ERROR) {
+					cerr << "send failed with Code: " << WSAGetLastError() << endl;
+					*ServerSocket = INVALID_SOCKET;
+					return 1;
+				}
+				ActiveEncrypt = TRUE; // 标记为主动加密
+				KeyConsult(ServerSocket); // 与peer协商AES密钥 交换RSA公钥
+				EncryptMode = TRUE; // 进入加密聊天模式
+				ActiveEncrypt = FALSE; // 协商完毕，标志复位
+				continue;
+			}
 		}
 		// 添加加密送信
 		byteCount = send(*ServerSocket, Buffer, (int)lstrlenA(Buffer) + 1, 0);
@@ -473,6 +535,8 @@ int main(int argc, char **argv) {
 		cerr << "Usage: " << argv[0] << " [ServerIP] [UserName]" << endl;
 		return 1;
 	}
+	strcpy_s(redirectSelf, "<sendto ");
+	strcat_s(redirectSelf, UserName);
 
 	// 初始化WSADATA
 	iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);

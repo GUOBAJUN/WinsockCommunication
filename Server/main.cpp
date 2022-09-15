@@ -380,6 +380,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 							send(ClientSocket, "send failed and redirected to Server", 37, 0);
 							ChatSockets[ClientSocket] = INVALID_SOCKET;
 						}
+						ChatSockets[ChatSockets[ClientSocket]] = ClientSocket; // 反向重定向聊天
 						byteCount = send(ClientSocket, "Server: Redirected Successfully!", 33, 0);
 						if (byteCount == SOCKET_ERROR) {
 							iResult = WSAGetLastError();
@@ -393,7 +394,6 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 							closesocket(ClientSocket);
 							return 1;
 						}
-						ChatSockets[ChatSockets[ClientSocket]] = ClientSocket; // 反向重定向聊天
 					}
 					else {
 						if (strcmp(Buffer, "Server") == 0)
@@ -453,12 +453,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 				continue;
 			}
 			if (ChatSockets[ClientSocket] != INVALID_SOCKET) {
-				SOCKET tmpSocket = ChatSockets[ClientSocket];
 				Buffer[byteCount] = '\0';
 				ChatTxt = Buffer;
 				// ChatTxt = ClientPortTransfer[atoi(ClientInfo.servstr)] + ": " + ChatTxt; // 客户端加密通信时，不方便去除首部信息，故删除
-				if (LinkToServer.find(tmpSocket) != LinkToServer.end()) { // 送信前需检查对方是否还在线
-					byteCount = send(tmpSocket, ChatTxt.c_str(), (int)ChatTxt.length(), 0);
+				if (LinkToServer.find(ChatSockets[ClientSocket]) != LinkToServer.end()) { // 送信前需检查对方是否还在线
+					byteCount = send(ChatSockets[ClientSocket], ChatTxt.c_str(), (int)ChatTxt.length(), 0);
 					if (byteCount == SOCKET_ERROR) {
 						send(ClientSocket, "send failed and redirected to Server", 37, 0);
 						if (byteCount == SOCKET_ERROR) {
