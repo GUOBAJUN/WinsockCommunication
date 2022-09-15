@@ -36,7 +36,9 @@
 #define DEFAULT_SERVER "127.0.0.1"
 #define DEFAULT_BUFLEN 4096
 #define UserNameLen 512
+#define DEFAULT_HASHLEN 70
 #define DEFAULT_RSA_KETLEN 1024
+#define DEFAULT_SHA256_CHARLEN 64
 #define DEFAULT_AES_KEYLEN 128
 #define DEFAULT_DH_KEYLEN 512
 #define ALICE_MAGICNUM "2F08E400A3"
@@ -55,7 +57,7 @@ BOOL EncryptMode = FALSE;
 // SHA256
 string SHA256(char* Buffer) {
 	string txt = Buffer, Result;
-	char buf[2];
+	char buf[3];
 	unsigned char Hash[SHA256_DIGEST_LENGTH];
 	SHA256_CTX context;
 	SHA256_Init(&context);
@@ -71,6 +73,22 @@ string SHA256(char* Buffer) {
 //AES128
 BYTE AESKey[128]; //实际上128位就几个字符
 INT AESKeyLen;
+AES_KEY KeyE, KeyD;
+DWORD WINAPI AESInit()
+{
+	INT iResult;
+	iResult = AES_set_encrypt_key(AESKey, DEFAULT_AES_KEYLEN, &KeyE);
+	if (iResult != 0) {
+		cerr << "AES_set_encrypt_key failed with Code: " << iResult << endl;
+		return 1;
+	}
+	iResult = AES_set_decrypt_key(AESKey, DEFAULT_AES_KEYLEN, &KeyD);
+	if (iResult != 0) {
+		cerr << "AES_set_decrypt_key failed with Code: " << iResult << endl;
+		return 1;
+	}
+	return 0;
+}
 
 // DH
 static const CHAR DH_P[] = "EBFB36DDEED6B166F8A2022ECCA3B64872E842FA4966A0B22A70188882E7894A1A08A9B3618DCF05CE61B973FC1977ED631953A51624273475AC4F8F3C7BF71D";
@@ -158,7 +176,8 @@ string RSA_PubKey_Encrypt(CHAR* Buffer)
 {
 	CHAR* EncryptedText;
 	string EncryptedStr;
-	BIO* KeyBIO = BIO_new_file(RSAChatKey, "rb");
+	BIO* KeyBIO = BIO_new(BIO_s_mem());
+	BIO_puts(KeyBIO, RSAChatKey);
 	if (!KeyBIO) {
 		cerr << "RSA_PubKey_Encrypt failed..." << endl;
 		return string("");
@@ -189,7 +208,8 @@ string RSA_PriKey_Decrypt(CHAR* Buffer)
 {
 	CHAR* EncryptedText;
 	string ClearText;
-	BIO* KeyBIO = BIO_new_file(PrivateKey, "rb");
+	BIO* KeyBIO = BIO_new(BIO_s_mem());
+	BIO_puts(KeyBIO, PrivateKey);
 	if (!KeyBIO) {
 		cerr << "RSA_Pri_Decrypt failed..." << endl;
 		return string("");
@@ -219,13 +239,14 @@ string RSA_PriKey_Decrypt(CHAR* Buffer)
 string RSA_PriKey_Sign(CHAR* Buffer) {
 	CHAR* EncryptedText;
 	string EncryptedStr;
-	BIO* KeyBIO = BIO_new_file(PrivateKey, "rb");
+	INT iResult;
+	BIO* KeyBIO = BIO_new_mem_buf(PrivateKey, PriKeyLen);
 	if (!KeyBIO) {
 		cerr << "RSA_PriKey_Sign failed..." << endl;
 		return string("");
 	}
 	RSA* rsa = RSA_new();
-	rsa = PEM_read_bio_RSAPublicKey(KeyBIO, NULL, NULL, NULL);
+	rsa = PEM_read_bio_RSAPrivateKey(KeyBIO, NULL, NULL, NULL);
 	if (!rsa) {
 		BIO_free_all(KeyBIO);
 		cerr << "RSA_PriKey_Sign failed..." << endl;
@@ -236,7 +257,7 @@ string RSA_PriKey_Sign(CHAR* Buffer) {
 	EncryptedText = (CHAR*)malloc(Len + 1);
 	ZeroMemory(EncryptedText, Len + 1);
 
-	INT iResult = RSA_public_encrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
+	iResult = RSA_private_encrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
 	if (iResult >= 0)
 		EncryptedStr = string(EncryptedText, iResult);
 	free(EncryptedText);
@@ -249,13 +270,14 @@ string RSA_PriKey_Sign(CHAR* Buffer) {
 string RSA_PubKey_Verify(CHAR* Buffer) {
 	CHAR* EncryptedText;
 	string ClearText;
-	BIO* KeyBIO = BIO_new_file(RSAChatKey, "rb");
+	BIO* KeyBIO = BIO_new(BIO_s_mem());
+	BIO_puts(KeyBIO, RSAChatKey);
 	if (!KeyBIO) {
 		cerr << "RSA_PubKey_Verify failed..." << endl;
 		return string("");
 	}
 	RSA* rsa = RSA_new();
-	rsa = PEM_read_bio_RSAPrivateKey(KeyBIO, NULL, NULL, NULL);
+	rsa = PEM_read_bio_RSAPublicKey(KeyBIO, NULL, NULL, NULL);
 	if (!rsa) {
 		cerr << "RSA_PubKey_Verify failed..." << endl;
 		BIO_free_all(KeyBIO);
@@ -266,7 +288,7 @@ string RSA_PubKey_Verify(CHAR* Buffer) {
 	EncryptedText = (CHAR*)malloc(Len + 1);
 	ZeroMemory(EncryptedText, Len + 1);
 
-	INT iResult = RSA_private_decrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
+	INT iResult = RSA_public_decrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
 	if (iResult >= 0)
 		ClearText = string(EncryptedText, iResult);
 	free(EncryptedText);
@@ -301,6 +323,7 @@ DWORD WINAPI KeyConsult(SOCKET *ServerSocket) {
 		byteCount = send(*ServerSocket, PublicKey, DEFAULT_RSA_KETLEN, 0); //发送自己的RSA公钥
 	}
 	DH_calc_shared_key(peerPub); // 计算AES128密钥
+	AESInit();                   // 初始化AES加密模块
 	if (ActiveEncrypt)
 		ResumeThread(hChatThread[0]);
 	else
@@ -309,14 +332,37 @@ DWORD WINAPI KeyConsult(SOCKET *ServerSocket) {
 }
 
 // 综合信息加密
-VOID WINAPI MessageEncrypt(CHAR* Buffer)
+VOID WINAPI MessageEncrypt(CHAR* Buffer, CHAR* mLen)
 {
 	INT Len = lstrlenA(Buffer);
-	CHAR Hash[SHA256_DIGEST_LENGTH];
+	CHAR Hash[DEFAULT_HASHLEN] = "";
 	CHAR msg[DEFAULT_BUFLEN] = "";
+	itoa(Len, mLen, 10); // 原始信息长度
 	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256
 	strcpy_s(msg, RSA_PriKey_Sign(Hash).c_str()); // 对SHA256签名
 	strcat_s(msg, Buffer); // 为消息添加签名后的SHA256首部
+	AES_ecb_encrypt((BYTE*)msg, (BYTE*)Buffer, &KeyE, AES_ENCRYPT); // AES加密，结果存储在Buffer中
+}
+
+// 综合信息解密
+VOID WINAPI MesssageDecrypt(CHAR* Buffer, INT mLen)
+{
+	CHAR msg[DEFAULT_BUFLEN] = "";
+	CHAR Hash[DEFAULT_HASHLEN] = "";
+	INT i, Len, bufLen = 0;
+	string vResult;
+	AES_ecb_encrypt((BYTE*)Buffer, (BYTE*)msg, &KeyD, AES_DECRYPT); // AES解密，结果存储在msg中
+	Len = lstrlenA(msg);
+	for (i = Len - mLen - 1; i < Len; i++) {// 提取原始消息
+		Buffer[bufLen++] = msg[i];
+	}
+	Buffer[bufLen] = '\0';      // 截断为原始信息 -> 返回到Receiver
+	msg[Len - mLen - 1] = '\0'; // 截断为签名后的SHA256
+	SHA256(Hash);               // 计算收信摘要
+	vResult = RSA_PubKey_Verify(msg); // 验证签名 获得SHA256
+	if (vResult != Hash) {
+		cerr << "Warning: The Message you've received may be modified..." << endl;
+	}
 }
 
 // 清除加密凭证
@@ -330,7 +376,7 @@ VOID WINAPI CleanEncrypt()
 	DH_free(dh); // 清除DH密钥
 	ZeroMemory(AESKey, DEFAULT_AES_KEYLEN);
 	AESKeyLen = 0; // 清除AES密钥
-	EncryptMode = FALSE;
+	EncryptMode = FALSE; // 退出加密模式
 }
 
 
@@ -376,6 +422,7 @@ DWORD WINAPI CmdCheck(char* txt) {
 * return 0 无特殊含义
 * return 1 进入加密
 * return 2 退出加密
+* return 3 接下来回收信保密信息
 */
 DWORD WINAPI msgCheck(char* txt) {
 	INT txtLen = 0;
@@ -397,6 +444,10 @@ DWORD WINAPI msgCheck(char* txt) {
 	if (argc == 5 && argv[2] == "connected" && argv[1] != UserName) return 1;
 	else if (argc == 8 && argv[1] == "friend") return 2;
 	else if (argc == 6 && argv[3] == "redirected") return 2;
+	else if (argc == 2 && argv[1] == "mLen") { 
+		strcpy(txt, argv[0].c_str()); // 将原始信息长度回传
+		return 3; 
+	}
 	return 0;
 }
 
@@ -408,7 +459,7 @@ DWORD WINAPI msgCheck(char* txt) {
 DWORD WINAPI Receiver(LPVOID lpParam) {
 	SOCKET *ServerSocket = (SOCKET*)lpParam; // 服务器Socket
 	CHAR Buffer[DEFAULT_BUFLEN], strNow[DEFAULT_BUFLEN]; // 接收缓存、时间戳
-	INT byteCount, iResult;
+	INT byteCount, iResult, mLen;
 	time_t Now;
 	struct tm ptm;
 	while (*ServerSocket != INVALID_SOCKET) {
@@ -431,7 +482,6 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 			localtime_s(&ptm, &Now);
 			strftime(strNow, DEFAULT_BUFLEN, "[%x %X] ", &ptm);
 			Buffer[byteCount] = '\0';
-			//TODO: 解密
 			cout << strNow << Buffer << endl;
 		}
 		else if (iResult == 1) { // 进入加密模式
@@ -446,6 +496,15 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 		else if (iResult == 2) { // 明文模式（与服务器直接连接）
 			CleanEncrypt();
 		}
+		else if (iResult == 3) {
+			mLen = atoi(Buffer); // 经过处理后Buffer已经变为原始信息长度
+			byteCount = recv(*ServerSocket, Buffer, DEFAULT_BUFLEN, 0); // 接收加密信息
+			MesssageDecrypt(Buffer, mLen);
+			time(&Now);
+			localtime_s(&ptm, &Now);
+			strftime(strNow, DEFAULT_BUFLEN, "[%x %X] ", &ptm);
+			cout << strNow << Buffer << endl;
+		}
 	}
 	return 0;
 }
@@ -457,12 +516,12 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 */
 DWORD WINAPI Sender(LPVOID lpParam) {
 	SOCKET* ServerSocket = (SOCKET*)lpParam; // 服务器Socket
-	char Buffer[DEFAULT_BUFLEN]; // 发送缓存
-	int byteCount, iResult;
+	CHAR Buffer[DEFAULT_BUFLEN]; // 发送缓存
+	CHAR mLen[128]; // 送信长度[十进制数字]
+	INT byteCount, iResult;
 	while (*ServerSocket != INVALID_SOCKET) {
 		ZeroMemory(Buffer, DEFAULT_BUFLEN);
 		cin.getline(Buffer, DEFAULT_BUFLEN); // 一次读取一行
-
 		iResult = CmdCheck(Buffer);
 		if (iResult == 1) { // 关闭客户端
 			CleanEncrypt(); // 销毁加密凭证
@@ -494,8 +553,12 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 				continue;
 			}
 		}
-		// 添加加密送信
-		byteCount = send(*ServerSocket, Buffer, (int)lstrlenA(Buffer) + 1, 0);
+		if (EncryptMode) {
+			MessageEncrypt(Buffer, mLen);                     // 加密原始信息，并返回原始信息长度
+			strcat_s(mLen, " mLen");                          // 给予Peer一个Hint
+			send(*ServerSocket, mLen, lstrlenA(mLen) + 1, 0); // 加密模式下明文传输原始信息长度
+		}
+		byteCount = send(*ServerSocket, Buffer, lstrlenA(Buffer) + 1, 0);
 		if (byteCount == SOCKET_ERROR) {
 			cerr << "send failed with Code: " << WSAGetLastError() << endl;
 			*ServerSocket = INVALID_SOCKET;
