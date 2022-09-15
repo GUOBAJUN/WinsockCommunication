@@ -341,6 +341,7 @@ VOID WINAPI MessageEncrypt(CHAR* Buffer, CHAR* mLen)
 	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256
 	strcpy_s(msg, RSA_PriKey_Sign(Hash).c_str()); // 对SHA256签名
 	strcat_s(msg, Buffer); // 为消息添加签名后的SHA256首部
+	// 需要封装AES，改为分块循环加密 解密同理
 	AES_ecb_encrypt((BYTE*)msg, (BYTE*)Buffer, &KeyE, AES_ENCRYPT); // AES加密，结果存储在Buffer中
 }
 
