@@ -348,12 +348,15 @@ string RSA_PriKey_Sign(CHAR* Buffer) {
 	}
 
 	INT Len = RSA_size(rsa);
-	EncryptedText = (CHAR*)malloc(Len + 1);
-	ZeroMemory(EncryptedText, Len + 1);
+	EncryptedText = (CHAR*)malloc(Len * 2 + 1);
+	ZeroMemory(EncryptedText, (Len * 2 + 1));
 
 	iResult = RSA_private_encrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
-	if (iResult >= 0)
-		EncryptedStr = string(EncryptedText, iResult);
+	if (iResult >= 0) // 将计算结果保存为HEX串
+	{
+		Bin2Hex((BYTE*)EncryptedText, EncryptedText, iResult);
+		EncryptedStr = string(EncryptedText, iResult * 2); // Bin2Hex长度翻倍
+	}
 	free(EncryptedText);
 	BIO_free_all(KeyBIO);
 	RSA_free(rsa);
@@ -433,13 +436,14 @@ VOID WINAPI MessageEncrypt(CHAR* Buffer,CHAR*oLen, CHAR* mLen)
 	CHAR msg[DEFAULT_BUFLEN] = "";
 	string SignedHash;
 	itoa(Len, oLen, 10); // 原始信息长度转换为字符串
-	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256
-	SignedHash = RSA_PriKey_Sign(Hash);
-	strcpy_s(msg, SignedHash.c_str()); // 对SHA256签名
+	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256 -> SHA256已经是HEX格式
+	SignedHash = RSA_PriKey_Sign(Hash); // 对SHA256值签名并以Hex格式存储
+	strcpy_s(msg, SignedHash.c_str());  // SHA256签名作为消息头，添加到msg中
 	strcat_s(msg, Buffer); // 为消息添加签名后的SHA256首部
-	itoa(Len + SignedHash.length(), mLen, 10);
 	AES_ECB_Encrypt_ZeroPadding((BYTE*)msg, (BYTE*)Buffer, Len + SignedHash.length());// AES加密，结果存储在Buffer中
-	// 将密文转换为HEX格式
+	Bin2Hex((BYTE*)Buffer, Buffer, ((Len + SignedHash.length()) / 16 + 1) * 16);// 将密文转换为HEX格式
+	Len = lstrlenA(Buffer);
+	itoa(Len, mLen, 10); // 加密后密文长度
 }
 
 // 综合信息解密
