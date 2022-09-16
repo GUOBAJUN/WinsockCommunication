@@ -231,7 +231,7 @@ DWORD WINAPI DH_calc_shared_key(CHAR* peerHex)
 }
 
 
-// RSA
+// RSA2
 RSA *rsa;
 CHAR* PrivateKey; // 我的RSA私钥
 CHAR* PublicKey;  // 我的RSA公钥
@@ -239,7 +239,7 @@ INT PriKeyLen;
 INT PubKeyLen;
 CHAR RSAChatKey[DEFAULT_RSA_KETLEN];    // 对方的RSA公钥
 VOID RSAinit() {
-	rsa = RSA_generate_key(DEFAULT_RSA_KETLEN, RSA_F4, NULL, NULL); // 生成密钥对
+	rsa = RSA_generate_key(DEFAULT_RSA_KETLEN, RSA_3, NULL, NULL); // 生成密钥对
 
 	BIO* Pri = BIO_new(BIO_s_mem());
 	BIO* Pub = BIO_new(BIO_s_mem());
@@ -390,7 +390,6 @@ VOID WINAPI MessageEncrypt(CHAR* Buffer,CHAR*oLen, CHAR* mLen)
 	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256 -> SHA256已经是HEX格式
 	SignedHash = RSA_PriKey_Sign(Hash); // 对SHA256值签名并以Hex格式存储
 	strcpy_s(msg, SignedHash.c_str());  // SHA256签名作为消息头，添加到msg中
-	cout << "signed hash:\n" << SignedHash << endl;
 	strcat_s(msg, Buffer);              // 为消息添加签名后的SHA256首部
 	AES_ECB_Encrypt_ZeroPadding((BYTE*)msg, (BYTE*)Buffer, Len + (INT)SignedHash.length());// AES加密，结果存储在Buffer中
 	Bin2Hex((BYTE*)Buffer, Buffer, ((Len + (INT)SignedHash.length()) / 16 + 1) * 16);// 将密文转换为HEX格式
@@ -464,6 +463,7 @@ DWORD WINAPI CmdCheck(CHAR* txt) {
 			continue;
 		}
 		unit.push_back(txt[i]);
+		if (argc > 8) return 0;
 	}
 	argv[argc++] = unit;
 	if (argv[0] == ">exit") return 1;
