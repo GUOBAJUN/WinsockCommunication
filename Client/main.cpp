@@ -81,12 +81,13 @@ VOID Hex2Bin(CHAR* Buffer, BYTE* msg, INT* Len) {
 	INT HexLen = lstrlenA(Buffer), cnt = 0;
 	CHAR buf[3]= "";
 	*Len = HexLen / 2;
-	msg = (BYTE*)malloc(*Len);
 	for (INT i = 0; i < HexLen; i += 2) {
 		buf[0] = Buffer[i];
 		buf[1] = Buffer[i + 1];
 		msg[cnt++] = Hex2Dec(buf);
 	}
+	msg[cnt] = '\0';
+	if (*Len != cnt) cerr << "DEBUG: Maybe err?" << endl;
 }
 
 // SHA256
@@ -127,10 +128,9 @@ DWORD WINAPI AESInit()
 
 DWORD AES_ECB_Encrypt_ZeroPadding(unsigned char* in, unsigned char* out, INT inLen)
 {
-	BYTE Zero[16];
+	BYTE Zero[16] = {0};
 	BYTE inTmp[1024] = "", outTmp[1024] = "";
 	INT rest, round;
-	ZeroMemory(Zero, 16);
 	if (inLen <= 16) {
 		AES_ecb_encrypt(in, out, &KeyE, AES_ENCRYPT);
 	}
@@ -252,7 +252,15 @@ VOID RSAinit() {
 	PubKeyLen = BIO_pending(Pub); // 获取密钥长度
 
 	PrivateKey = (CHAR*)malloc(PriKeyLen + 1);
+	if (PrivateKey == NULL) {
+		cerr << "malloc failed for PrivateKey..." << endl;
+		return;
+	}
 	PublicKey = (CHAR*)malloc(PubKeyLen + 1);
+	if (PublicKey == NULL) {
+		cerr << "malloc failed for PublicKey..." << endl;
+		return;
+	}
 
 	BIO_read(Pri, PrivateKey, PriKeyLen);
 	BIO_read(Pub, PublicKey, PubKeyLen);
@@ -286,6 +294,10 @@ string RSA_PubKey_Encrypt(CHAR* Buffer)
 
 	INT Len = RSA_size(rsa);
 	EncryptedText = (CHAR*)malloc(Len + 1);
+	if (EncryptedText == NULL) {
+		cerr << "malloc for EncryptedText failed..." << endl;
+		return string("");
+	}
 	ZeroMemory(EncryptedText,  Len + 1);
 	
 	INT iResult = RSA_public_encrypt(lstrlenA(Buffer), (const unsigned char*)Buffer,(unsigned char*) EncryptedText, rsa, RSA_PKCS1_PADDING);
@@ -318,6 +330,10 @@ string RSA_PriKey_Decrypt(CHAR* Buffer)
 	}
 	INT Len = RSA_size(rsa);
 	EncryptedText = (CHAR*)malloc(Len + 1);
+	if (EncryptedText == NULL) {
+		cerr << "malloc for EncryptedText failed..." << endl;
+		return string("");
+	}
 	ZeroMemory(EncryptedText, Len + 1);
 
 	INT iResult = RSA_private_decrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
@@ -349,6 +365,10 @@ string RSA_PriKey_Sign(CHAR* Buffer) {
 
 	INT Len = RSA_size(rsa);
 	EncryptedText = (CHAR*)malloc(Len * 2 + 1);
+	if (EncryptedText == NULL) {
+		cerr << "malloc for EncryptedText failed..." << endl;
+		return string("");
+	}
 	ZeroMemory(EncryptedText, (Len * 2 + 1));
 
 	iResult = RSA_private_encrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
@@ -383,6 +403,10 @@ string RSA_PubKey_Verify(CHAR* Buffer) {
 	}
 	INT Len = RSA_size(rsa);
 	EncryptedText = (CHAR*)malloc(Len + 1);
+	if (EncryptedText == NULL) {
+		cerr << "malloc for EncryptedText failed..." << endl;
+		return string("");
+	}
 	ZeroMemory(EncryptedText, Len + 1);
 
 	INT iResult = RSA_public_decrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
@@ -451,17 +475,19 @@ VOID WINAPI MesssageDecrypt(CHAR* Buffer,INT oLen, INT mLen)
 {
 	CHAR msg[DEFAULT_BUFLEN] = "";
 	string verHash;
-	INT i, Len, bufLen = 0;
+	INT i, Len, bufLen = 0, msgLen;
 	string vResult;
-	// 将密文转换为BIN格式
+	Hex2Bin(Buffer, (BYTE*)Buffer, &mLen); // 将密文转换为BIN格式 长度折半，所以可以用Buffer自己存
 	AES_EBC_Decrypt_ZeroPadding((BYTE*)Buffer, (BYTE*)msg, mLen);// AES解密，结果存储在msg中
 	Len = lstrlenA(msg);
 	for (i = Len - oLen; i < Len; i++) {// 提取原始消息
 		Buffer[bufLen++] = msg[i];
 	}
 	Buffer[bufLen] = '\0';      // 截断为原始信息 -> 返回到Receiver
-	msg[Len - oLen] = '\0';    // 截断为签名后的SHA256
-	verHash = SHA256(msg);               // 计算收信摘要
+	msgLen = Len - oLen;
+	msg[msgLen] = '\0';    // 截断为签名后的SHA256
+	verHash = SHA256(Buffer);               // 计算收信摘要
+	Hex2Bin(msg, (BYTE*)msg, &msgLen);//RSA 从HEX转为BIN
 	vResult = RSA_PubKey_Verify(msg); // 验证签名 获得SHA256
 	if (vResult != verHash) {
 		cerr << "Warning: The Message you've received may be modified..." << endl;
@@ -603,14 +629,16 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 			time(&Now);
 			localtime_s(&ptm, &Now);
 			strftime(strNow, DEFAULT_BUFLEN, "[%x %X] ", &ptm);
-			Buffer[byteCount] = '\0';
+			if (byteCount < DEFAULT_BUFLEN)
+				Buffer[byteCount] = '\0';
 			cout << strNow << Buffer << endl;
 		}
 		else if (iResult == 1) { // 进入加密模式
 			time(&Now);
 			localtime_s(&ptm, &Now);
 			strftime(strNow, DEFAULT_BUFLEN, "[%x %X] ", &ptm);
-			Buffer[byteCount] = '\0';
+			if(byteCount < DEFAULT_BUFLEN)
+				Buffer[byteCount] = '\0';
 			cout << strNow << Buffer << endl; // 输出服务器的明文通告
 			KeyConsult(ServerSocket); // 与Peer协商密钥
 			EncryptMode = TRUE;  // 被动加密
@@ -639,7 +667,7 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 DWORD WINAPI Sender(LPVOID lpParam) {
 	SOCKET* ServerSocket = (SOCKET*)lpParam; // 服务器Socket
 	CHAR Buffer[DEFAULT_BUFLEN]; // 发送缓存
-	CHAR mLen[128], oLen[128]; // 送信长度(十进制数字)
+	CHAR mLen[128] = "", oLen[128] = ""; // 送信长度(十进制数字)
 	string hint;
 	INT byteCount, iResult;
 	while (*ServerSocket != INVALID_SOCKET) {
@@ -683,7 +711,7 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 			hint.append(oLen);
 			hint.append(" mLen ");
 			hint.append(mLen);// 给予Peer一个Hint
-			send(*ServerSocket, hint.c_str(), hint.length(), 0); // 加密模式下明文传输原始信息长度
+			send(*ServerSocket, hint.c_str(), hint.length(), 0);    // 加密模式下明文传输原始信息长度
 		}
 		byteCount = send(*ServerSocket, Buffer, atoi(mLen), 0);
 		if (byteCount == SOCKET_ERROR) {
