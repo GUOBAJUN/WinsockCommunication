@@ -38,7 +38,7 @@
 #define DEFAULT_BUFLEN 4096
 #define UserNameLen 512
 #define DEFAULT_HASHLEN 70
-#define DEFAULT_RSA_KETLEN 1024
+#define DEFAULT_RSA_KETLEN 2048
 #define DEFAULT_SHA256_CHARLEN 64
 #define DEFAULT_AES_KEYLEN 128
 #define DEFAULT_DH_KEYLEN 512
@@ -87,14 +87,13 @@ VOID Hex2Bin(CHAR* Buffer, BYTE* msg, INT* Len) {
 		msg[cnt++] = Hex2Dec(buf);
 	}
 	msg[cnt] = '\0';
-	if (*Len != cnt) cerr << "DEBUG: Maybe err?" << endl;
 }
 
 // SHA256
-string SHA256(char* Buffer) {
+string SHA256(CHAR* Buffer) {
 	string txt = Buffer, Result;
-	char buf[3];
-	unsigned char Hash[SHA256_DIGEST_LENGTH];
+	CHAR buf[3];
+	BYTE Hash[SHA256_DIGEST_LENGTH];
 	SHA256_CTX context;
 	SHA256_Init(&context);
 	SHA256_Update(&context, txt.c_str(), txt.size());
@@ -126,7 +125,7 @@ DWORD WINAPI AESInit()
 	return 0;
 }
 
-DWORD AES_ECB_Encrypt_ZeroPadding(unsigned char* in, unsigned char* out, INT inLen)
+DWORD AES_ECB_Encrypt_ZeroPadding(BYTE* in, BYTE* out, INT inLen)
 {
 	BYTE Zero[16] = {0};
 	BYTE inTmp[1024] = "", outTmp[1024] = "";
@@ -273,78 +272,6 @@ VOID RSAinit() {
 	BIO_free_all(Pri);
 }
 
-// RSA公钥加密
-string RSA_PubKey_Encrypt(CHAR* Buffer)
-{
-	CHAR* EncryptedText;
-	string EncryptedStr;
-	BIO* KeyBIO = BIO_new(BIO_s_mem());
-	BIO_puts(KeyBIO, RSAChatKey);
-	if (!KeyBIO) {
-		cerr << "RSA_PubKey_Encrypt failed..." << endl;
-		return string("");
-	}
-	RSA* rsa = RSA_new();
-	rsa = PEM_read_bio_RSAPublicKey(KeyBIO, NULL, NULL, NULL);
-	if (!rsa) {
-		BIO_free_all(KeyBIO);
-		cerr << "RSA_PubKey_Encrypt failed..." << endl;
-		return string("");
-	}
-
-	INT Len = RSA_size(rsa);
-	EncryptedText = (CHAR*)malloc(Len + 1);
-	if (EncryptedText == NULL) {
-		cerr << "malloc for EncryptedText failed..." << endl;
-		return string("");
-	}
-	ZeroMemory(EncryptedText,  Len + 1);
-	
-	INT iResult = RSA_public_encrypt(lstrlenA(Buffer), (const unsigned char*)Buffer,(unsigned char*) EncryptedText, rsa, RSA_PKCS1_PADDING);
-	if (iResult >= 0)
-		EncryptedStr = string(EncryptedText, iResult);
-	free(EncryptedText);
-	BIO_free_all(KeyBIO);
-	RSA_free(rsa);
-	return EncryptedStr;
-}
-
-// RSA私钥解密
-string RSA_PriKey_Decrypt(CHAR* Buffer)
-{
-	CHAR* EncryptedText;
-	string ClearText;
-	BIO* KeyBIO = BIO_new(BIO_s_mem());
-	BIO_puts(KeyBIO, PrivateKey);
-	if (!KeyBIO) {
-		cerr << "RSA_Pri_Decrypt failed..." << endl;
-		return string("");
-	}
-	RSA* rsa = RSA_new();
-	rsa = PEM_read_bio_RSAPrivateKey(KeyBIO, NULL, NULL, NULL);
-	if (!rsa) {
-		cerr << "RSA_Pri_Decrypt failed..." << endl;
-		BIO_free_all(KeyBIO);
-		RSA_free(rsa);
-		return string("");
-	}
-	INT Len = RSA_size(rsa);
-	EncryptedText = (CHAR*)malloc(Len + 1);
-	if (EncryptedText == NULL) {
-		cerr << "malloc for EncryptedText failed..." << endl;
-		return string("");
-	}
-	ZeroMemory(EncryptedText, Len + 1);
-
-	INT iResult = RSA_private_decrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
-	if (iResult >= 0)
-		ClearText = string(EncryptedText, iResult);
-	free(EncryptedText);
-	BIO_free_all(KeyBIO);
-	RSA_free(rsa);
-	return ClearText;
-}
-
 // RSA私钥签名
 string RSA_PriKey_Sign(CHAR* Buffer) {
 	CHAR* EncryptedText;
@@ -371,7 +298,7 @@ string RSA_PriKey_Sign(CHAR* Buffer) {
 	}
 	ZeroMemory(EncryptedText, (Len * 2 + 1));
 
-	iResult = RSA_private_encrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
+	iResult = RSA_private_encrypt(lstrlenA(Buffer), (const BYTE*)Buffer, (BYTE*)EncryptedText, rsa, RSA_PKCS1_PADDING);
 	if (iResult >= 0) // 将计算结果保存为HEX串
 	{
 		Bin2Hex((BYTE*)EncryptedText, EncryptedText, iResult);
@@ -402,14 +329,14 @@ string RSA_PubKey_Verify(CHAR* Buffer) {
 		return string("");
 	}
 	INT Len = RSA_size(rsa);
-	EncryptedText = (CHAR*)malloc(Len + 1);
+	EncryptedText = (CHAR*)malloc(Len * 2 + 1);
 	if (EncryptedText == NULL) {
 		cerr << "malloc for EncryptedText failed..." << endl;
 		return string("");
 	}
-	ZeroMemory(EncryptedText, Len + 1);
+	ZeroMemory(EncryptedText, Len * 2 + 1);
 
-	INT iResult = RSA_public_decrypt(lstrlenA(Buffer), (const unsigned char*)Buffer, (unsigned char*)EncryptedText, rsa, RSA_PKCS1_PADDING);
+	INT iResult = RSA_public_decrypt(lstrlenA(Buffer), (const BYTE*)Buffer, (BYTE*)EncryptedText, rsa, RSA_PKCS1_PADDING);
 	if (iResult >= 0)
 		ClearText = string(EncryptedText, iResult);
 	free(EncryptedText);
@@ -463,10 +390,12 @@ VOID WINAPI MessageEncrypt(CHAR* Buffer,CHAR*oLen, CHAR* mLen)
 	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256 -> SHA256已经是HEX格式
 	SignedHash = RSA_PriKey_Sign(Hash); // 对SHA256值签名并以Hex格式存储
 	strcpy_s(msg, SignedHash.c_str());  // SHA256签名作为消息头，添加到msg中
-	strcat_s(msg, Buffer); // 为消息添加签名后的SHA256首部
+	cout << "signed hash:\n" << SignedHash << endl;
+	strcat_s(msg, Buffer);              // 为消息添加签名后的SHA256首部
 	AES_ECB_Encrypt_ZeroPadding((BYTE*)msg, (BYTE*)Buffer, Len + (INT)SignedHash.length());// AES加密，结果存储在Buffer中
 	Bin2Hex((BYTE*)Buffer, Buffer, ((Len + (INT)SignedHash.length()) / 16 + 1) * 16);// 将密文转换为HEX格式
 	Len = lstrlenA(Buffer);
+	// DEBUG
 	itoa(Len, mLen, 10); // 加密后密文长度
 }
 
@@ -518,7 +447,7 @@ VOID WINAPI CleanEncrypt()
 * 参数：客户端输入的文本
 * >exit 断开与服务器的连接并关闭客户端
 */
-DWORD WINAPI CmdCheck(char* txt) {
+DWORD WINAPI CmdCheck(CHAR* txt) {
 	if (txt[0] != '<' && txt[0] != '>')
 		return 0;
 
@@ -553,7 +482,7 @@ DWORD WINAPI CmdCheck(char* txt) {
 * return 2 退出加密
 * return 3 接下来回收信保密信息
 */
-DWORD WINAPI msgCheck(char* txt) {
+DWORD WINAPI msgCheck(CHAR* txt) {
 	INT txtLen = 0;
 	INT argc = 0;
 	string argv[10];
@@ -723,11 +652,11 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 	return 0;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, CHAR **argv) {
 	WSADATA wsaData;
 	SOCKET ConnectSocket = INVALID_SOCKET;
 	addrinfo* results = NULL, * ptr = NULL, hints;
-	char Buffer[DEFAULT_BUFLEN], hoststr[NI_MAXHOST], servstr[NI_MAXSERV], Server[NI_MAXHOST];
+	CHAR Buffer[DEFAULT_BUFLEN], hoststr[NI_MAXHOST], servstr[NI_MAXSERV], Server[NI_MAXHOST];
 	int iResult;
 
 	// 配置客户端参数
