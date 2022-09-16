@@ -464,8 +464,8 @@ VOID WINAPI MessageEncrypt(CHAR* Buffer,CHAR*oLen, CHAR* mLen)
 	SignedHash = RSA_PriKey_Sign(Hash); // 对SHA256值签名并以Hex格式存储
 	strcpy_s(msg, SignedHash.c_str());  // SHA256签名作为消息头，添加到msg中
 	strcat_s(msg, Buffer); // 为消息添加签名后的SHA256首部
-	AES_ECB_Encrypt_ZeroPadding((BYTE*)msg, (BYTE*)Buffer, Len + SignedHash.length());// AES加密，结果存储在Buffer中
-	Bin2Hex((BYTE*)Buffer, Buffer, ((Len + SignedHash.length()) / 16 + 1) * 16);// 将密文转换为HEX格式
+	AES_ECB_Encrypt_ZeroPadding((BYTE*)msg, (BYTE*)Buffer, Len + (INT)SignedHash.length());// AES加密，结果存储在Buffer中
+	Bin2Hex((BYTE*)Buffer, Buffer, ((Len + (INT)SignedHash.length()) / 16 + 1) * 16);// 将密文转换为HEX格式
 	Len = lstrlenA(Buffer);
 	itoa(Len, mLen, 10); // 加密后密文长度
 }
@@ -711,7 +711,7 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 			hint.append(oLen);
 			hint.append(" mLen ");
 			hint.append(mLen);// 给予Peer一个Hint
-			send(*ServerSocket, hint.c_str(), hint.length(), 0);    // 加密模式下明文传输原始信息长度
+			send(*ServerSocket, hint.c_str(), (INT)hint.length(), 0);    // 加密模式下明文传输原始信息长度
 		}
 		byteCount = send(*ServerSocket, Buffer, atoi(mLen), 0);
 		if (byteCount == SOCKET_ERROR) {
