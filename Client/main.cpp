@@ -297,8 +297,8 @@ string RSA_PriKey_Sign(CHAR* Buffer) {
 }
 
 // RSA公钥验签
-string RSA_PubKey_Verify(CHAR* Buffer) {
-	CHAR* EncryptedText;
+string RSA_PubKey_Verify(CHAR* Buffer, INT mLen) {
+	CHAR* DecryptedText;
 	string ClearText;
 	BIO* KeyBIO = BIO_new(BIO_s_mem());
 	BIO_puts(KeyBIO, RSAChatKey);
@@ -315,17 +315,17 @@ string RSA_PubKey_Verify(CHAR* Buffer) {
 		return string("");
 	}
 	INT Len = RSA_size(rsa);
-	EncryptedText = (CHAR*)malloc(Len * 2 + 1);
-	if (EncryptedText == NULL) {
+	DecryptedText = (CHAR*)malloc(Len * 2 + 1);
+	if (DecryptedText == NULL) {
 		cerr << "malloc for EncryptedText failed..." << endl;
 		return string("");
 	}
-	ZeroMemory(EncryptedText, Len * 2 + 1);
+	ZeroMemory(DecryptedText, Len * 2 + 1);
 
-	INT iResult = RSA_public_decrypt(lstrlenA(Buffer), (const BYTE*)Buffer, (BYTE*)EncryptedText, rsa, RSA_PKCS1_PADDING);
+	INT iResult = RSA_public_decrypt(mLen, (const BYTE*)Buffer, (BYTE*)DecryptedText, rsa, RSA_PKCS1_PADDING);
 	if (iResult >= 0)
-		ClearText = string(EncryptedText, iResult);
-	free(EncryptedText);
+		ClearText = string(DecryptedText, iResult);
+	free(DecryptedText);
 	BIO_free_all(KeyBIO);
 	RSA_free(rsa);
 	return ClearText;
@@ -375,16 +375,16 @@ VOID WINAPI MessageEncrypt(CHAR* Buffer,CHAR*oLen, CHAR* mLen)
 	itoa(Len, oLen, 10);                    // 原始信息长度转换为字符串
 	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256 -> SHA256已经是HEX格式
 	SignedHash = RSA_PriKey_Sign(Hash);		// 对SHA256值签名并以Hex格式存储
+
+	//cout << PrivateKey << endl;
+
+	//cout << "SignedHash:\n" << SignedHash << endl;
+
 	strcpy_s(msg, SignedHash.c_str());		// SHA256签名作为消息头，添加到msg中
 	strcat_s(msg, Buffer);					// 为消息添加签名后的SHA256首部
 	AES_ECB_Encrypt_ZeroPadding((BYTE*)msg, (BYTE*)Buffer, Len + (INT)SignedHash.size());// AES加密，结果存储在Buffer中
-	
-	cout << "AES Buffer 2048" << endl;
-	print2Hex((BYTE*)Buffer, 2048);
-	
 	Bin2Hex((BYTE*)Buffer, Buffer, ((Len + (INT)SignedHash.length()) / 16 + 1) * 16);// 将密文转换为HEX格式
 	Len = lstrlenA(Buffer);
-	// DEBUG
 	itoa(Len, mLen, 10); // 加密后密文长度
 }
 
@@ -405,8 +405,8 @@ VOID WINAPI MesssageDecrypt(CHAR* Buffer,INT oLen, INT mLen)
 	msgLen = Len - oLen;
 	msg[msgLen] = '\0';    // 截断为签名后的SHA256
 	verHash = SHA256(Buffer);               // 计算收信摘要
-	Hex2Bin(msg, (BYTE*)msg, &msgLen);//RSA 从HEX转为BIN
-	vResult = RSA_PubKey_Verify(msg); // 验证签名 获得SHA256
+	Hex2Bin(msg, (BYTE*)msg, &msgLen);//RSA 从HEX转为BIN 长度减半
+	vResult = RSA_PubKey_Verify(msg, msgLen); // 验证签名 获得SHA256
 	if (vResult != verHash) {
 		cerr << "Warning: The Message you've received may be modified..." << endl;
 	}
