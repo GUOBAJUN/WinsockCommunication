@@ -41,6 +41,7 @@
 #define DEFAULT_RSA_KETLEN 2048
 #define DEFAULT_SHA256_CHARLEN 64
 #define DEFAULT_AES_KEYLEN 128
+#define DEFAULT_AES_BLOCK 16
 #define DEFAULT_DH_KEYLEN 512
 #define ALICE_MAGICNUM "2F08E400A3"
 
@@ -59,12 +60,21 @@ BOOL EncryptMode = FALSE;
 VOID Bin2Hex(BYTE* Buffer, CHAR* msg,INT Len)
 {
 	string result;
-	CHAR buf[3];
+	CHAR buf[3]="";
 	for (INT i = 0; i < Len; i++) {
 		sprintf_s(buf, "%02x", Buffer[i]);
 		result += buf;
 	}
 	strcpy(msg, result.c_str());
+}
+
+VOID print2Hex(BYTE* Buffer, INT Len) {
+	CHAR buf[3] = "";
+	for (INT i = 0; i < Len; i++) {
+		sprintf(buf, "%02x", Buffer[i]);
+		cout << buf << " ";
+	}
+	cout << endl;
 }
 
 BYTE Hex2Dec(CHAR* hex)
@@ -127,59 +137,35 @@ DWORD WINAPI AESInit()
 
 DWORD AES_ECB_Encrypt_ZeroPadding(BYTE* in, BYTE* out, INT inLen)
 {
-	BYTE Zero[16] = {0};
-	BYTE inTmp[1024] = "", outTmp[1024] = "";
-	INT rest, round;
-	if (inLen <= 16) {
-		AES_ecb_encrypt(in, out, &KeyE, AES_ENCRYPT);
+	INT Len = inLen / 16 + 1;
+	CHAR* data = (CHAR*)malloc(DEFAULT_AES_BLOCK * Len);
+	BYTE* Cipher = (BYTE*)malloc(DEFAULT_AES_BLOCK * Len + 33);
+	BYTE* Plain = (BYTE*)malloc(DEFAULT_AES_BLOCK * Len);
+	if (!data || !Cipher || !Plain) {
+		cerr << "malloc failed..." << endl;
+		return 1;
 	}
-	else {
-		rest = inLen % 16;
-		round = (inLen - rest) / 16;
-		memcpy(inTmp, in, 1024);
-		strcat((CHAR*)inTmp, (CHAR*)Zero);
-		memcpy(in, inTmp, (round + 1) * 16);// zero padding
-		for (INT i = 0; i < round + 1; i++) { // 分组加密并拼接密文
-			memcpy(inTmp, in + 16 * i, 16);
-			AES_ecb_encrypt(inTmp, outTmp, &KeyE, AES_ENCRYPT);
-			memcpy(out + 16 * i, outTmp, 16);
-			ZeroMemory(inTmp, 1024);
-			ZeroMemory(outTmp, 1024);
-		}
-	}
+	ZeroMemory(data, DEFAULT_AES_BLOCK * Len);
+	ZeroMemory(Cipher, DEFAULT_AES_BLOCK * Len + 33);
+	ZeroMemory(Plain, DEFAULT_AES_BLOCK * Len);
+	strcpy_s(data, DEFAULT_AES_BLOCK * Len, (const CHAR*)in);
+	for (INT i = 0; i < Len; i++)
+		AES_ecb_encrypt((BYTE*)(data + i * DEFAULT_AES_BLOCK), Cipher + i * DEFAULT_AES_BLOCK, &KeyE, AES_ENCRYPT);
+	memcpy_s(out, 4096, Cipher, DEFAULT_AES_BLOCK * Len + 33);
+	free(data);
+	free(Cipher);
+	free(Plain);
 	return 0;
 }
 
 DWORD AES_EBC_Decrypt_ZeroPadding(const BYTE* in , BYTE* out, INT inLen)
 {
-	INT rest = 0, round, cnt = 0, ret = 0;
-	BYTE inTmp[1024] = "", outTmp[1024] = "";
-	if (inLen == 16) {
-		AES_ecb_encrypt(in, out, &KeyD, AES_DECRYPT);
-	}
-	else {
-		round = inLen / 16;
-		for (INT i = 0, j; i < round; i++) {
-			if (i == round - 1) {
-				memcpy(inTmp, in + 16 * i, 16);
-				AES_ecb_encrypt(inTmp, outTmp, &KeyD, AES_DECRYPT);
-				for (j = 0; j < 16; j++) {
-					if (outTmp[j] == '\0') {
-						ret = 16 - j;
-						break;
-					}
-				}
-				memcpy(out + 16 * i, outTmp, ret);
-			}
-			else {
-				memcpy(inTmp, in + 16 * i, 16);
-				AES_ecb_encrypt(inTmp, outTmp, &KeyD, AES_DECRYPT);
-				memcpy(out + 16 * i, outTmp, 16);
-				ZeroMemory(inTmp, 1024);
-				ZeroMemory(outTmp, 1024);
-			}
-		}
-	}
+	auto Pres = new CHAR[inLen];
+	ZeroMemory(Pres, inLen);
+	for (INT i = 0; i < inLen / 16; i++)
+		AES_ecb_encrypt((BYTE*)(in + i * DEFAULT_AES_BLOCK), (BYTE*)(Pres + i * DEFAULT_AES_BLOCK), &KeyD, AES_DECRYPT);
+	memcpy(out, Pres, inLen);
+	delete[] Pres;
 	return 0;
 }
 
@@ -202,10 +188,10 @@ DWORD WINAPI DH_generate_key()
 		return 1;
 	}
 	DH_set0_pqg(dh, dhP, NULL, dhG);
-	if (strcmp(UserName, "Alice") == 0) { // Alice的私钥使用爱丽丝魔数
-		BIGNUM* Pub = BN_new();
-		BN_hex2bn(&Pub, ALICE_MAGICNUM);
-		DH_set0_key(dh, Pub, NULL);
+	if (strcmp(UserName, "Alice") == 0) { // Alice使用爱丽丝魔数
+		BIGNUM* Pri = BN_new();
+		BN_hex2bn(&Pri, ALICE_MAGICNUM);
+		DH_set0_key(dh, NULL, Pri);
 	}
 	if (DH_generate_key(dh) != 1) {
 		cerr << "DH_generate_key failed..." << endl;
@@ -386,12 +372,16 @@ VOID WINAPI MessageEncrypt(CHAR* Buffer,CHAR*oLen, CHAR* mLen)
 	CHAR Hash[DEFAULT_HASHLEN] = "";
 	CHAR msg[DEFAULT_BUFLEN] = "";
 	string SignedHash;
-	itoa(Len, oLen, 10); // 原始信息长度转换为字符串
+	itoa(Len, oLen, 10);                    // 原始信息长度转换为字符串
 	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256 -> SHA256已经是HEX格式
-	SignedHash = RSA_PriKey_Sign(Hash); // 对SHA256值签名并以Hex格式存储
-	strcpy_s(msg, SignedHash.c_str());  // SHA256签名作为消息头，添加到msg中
-	strcat_s(msg, Buffer);              // 为消息添加签名后的SHA256首部
-	AES_ECB_Encrypt_ZeroPadding((BYTE*)msg, (BYTE*)Buffer, Len + (INT)SignedHash.length());// AES加密，结果存储在Buffer中
+	SignedHash = RSA_PriKey_Sign(Hash);		// 对SHA256值签名并以Hex格式存储
+	strcpy_s(msg, SignedHash.c_str());		// SHA256签名作为消息头，添加到msg中
+	strcat_s(msg, Buffer);					// 为消息添加签名后的SHA256首部
+	AES_ECB_Encrypt_ZeroPadding((BYTE*)msg, (BYTE*)Buffer, Len + (INT)SignedHash.size());// AES加密，结果存储在Buffer中
+	
+	cout << "AES Buffer 2048" << endl;
+	print2Hex((BYTE*)Buffer, 2048);
+	
 	Bin2Hex((BYTE*)Buffer, Buffer, ((Len + (INT)SignedHash.length()) / 16 + 1) * 16);// 将密文转换为HEX格式
 	Len = lstrlenA(Buffer);
 	// DEBUG
@@ -578,6 +568,8 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 		else if (iResult == 3) {
 			GetOMLen(Buffer, &oLen, &mLen); // 经过处理后Buffer已经变为原始信息长度
 			byteCount = recv(*ServerSocket, Buffer, DEFAULT_BUFLEN, 0); // 接收加密信息
+			if (mLen != byteCount)
+				cout << "mLen != ByteCount, please Check" << endl;
 			MesssageDecrypt(Buffer,oLen, mLen);
 			time(&Now);
 			localtime_s(&ptm, &Now);
