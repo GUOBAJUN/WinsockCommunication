@@ -36,8 +36,8 @@ using std::string;
 
 struct SocketInfo {
 	SOCKET Sockfd;
-	char servstr[NI_MAXSERV];
-	SocketInfo(SOCKET Sock, char serv[NI_MAXSERV]) {
+	CHAR servstr[NI_MAXSERV];
+	SocketInfo(SOCKET Sock, CHAR serv[NI_MAXSERV]) {
 		Sockfd = Sock;
 		strcpy_s(servstr, serv);
 	}
@@ -46,27 +46,28 @@ struct SocketInfo {
 struct CmdInfo {
 	string cmd;
 	SOCKET ChatSocket;
+	CmdInfo() { cmd = ""; ChatSocket = INVALID_SOCKET; }
 }; // 为CmdCheck提供解析结果存储
 
 map<string, SOCKET> ClientNameTransfer; // 用户名到Socket映射
-map<int, string> ClientPortTransfer;    // 用户端口到用户名映射
+map<INT, string> ClientPortTransfer;    // 用户端口到用户名映射
 map<SOCKET, SOCKET> ChatSockets;    // 客户端P2P映射
 set<SOCKET> LinkToServer;               // 连接到Server的Socket
 
 DWORD WINAPI ServerThread(LPVOID lpParam); // 为每一个客户端提供连接线程
 DWORD WINAPI ChatThread(LPVOID lpParam);   // 为每一个客户端提供聊天线程
-DWORD WINAPI CmdCheck(char* Txt);          // 检查客户端是否发送服务器命令
-CmdInfo WINAPI CmdCommit(char* Txt);       // 执行来自客户端的命令
+DWORD WINAPI CmdCheck(CHAR* Txt);          // 检查客户端是否发送服务器命令
+CmdInfo WINAPI CmdCommit(CHAR* Txt);       // 执行来自客户端的命令
 
 
-int main()
+INT main()
 {
 	WSADATA wsaData;
-	int iResult;
+	INT iResult;
 	addrinfo* results = NULL, * ptr = NULL, hints;
 	SOCKET* ServerSockets = NULL; // 供服务器侦听客户端连接
 	HANDLE* ServerThreads = NULL;
-	char hoststr[NI_MAXHOST], servstr[NI_MAXSERV];
+	CHAR hoststr[NI_MAXHOST], servstr[NI_MAXSERV];
 	INT socket_count = 0;
 
 	ClientNameTransfer[(string)"Server"] = INVALID_SOCKET; // 为Server提供名称映射
@@ -119,7 +120,7 @@ int main()
 	}
 
 	// 初始化服务Socket序列
-	for (int i = 0; i < socket_count; i++)
+	for (INT i = 0; i < socket_count; i++)
 		ServerSockets[i] = INVALID_SOCKET;
 
 	cout << "Server up!!!" << endl;
@@ -130,7 +131,7 @@ int main()
 	while (ptr) {
 		ServerSockets[socket_count] = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol); // 为服务器创建Socket
 		if (ServerSockets[socket_count] == INVALID_SOCKET) {
-			for (int i = 0; i < socket_count; i++)
+			for (INT i = 0; i < socket_count; i++)
 			{
 				if (ServerSockets[i] != INVALID_SOCKET)
 					closesocket(ServerSockets[i]);
@@ -144,10 +145,10 @@ int main()
 		}
 
 
-		iResult = bind(ServerSockets[socket_count], ptr->ai_addr, (int)ptr->ai_addrlen); // 将服务器Socket绑定到端口
+		iResult = bind(ServerSockets[socket_count], ptr->ai_addr, (INT)ptr->ai_addrlen); // 将服务器Socket绑定到端口
 		if (iResult == SOCKET_ERROR) {
 			cerr << "bind failed with Code: " << WSAGetLastError() << endl;
-			for (int i = 0; i < socket_count; i++)
+			for (INT i = 0; i < socket_count; i++)
 			{
 				if (ServerSockets[i] != INVALID_SOCKET)
 					closesocket(ServerSockets[i]);
@@ -163,7 +164,7 @@ int main()
 		iResult = listen(ServerSockets[socket_count], SOMAXCONN); // 服务器开始侦听是否有客户端连接，单Socket允许连接数设为最大值
 		if (iResult == SOCKET_ERROR) {
 			cerr << "listen failed with Code: " << WSAGetLastError() << endl;
-			for (int i = 0; i < socket_count; i++)
+			for (INT i = 0; i < socket_count; i++)
 			{
 				if (ServerSockets[i] != INVALID_SOCKET)
 					closesocket(ServerSockets[i]);
@@ -180,7 +181,7 @@ int main()
 		iResult = getnameinfo(ptr->ai_addr, (socklen_t)ptr->ai_addrlen, hoststr, NI_MAXHOST, servstr, NI_MAXSERV, NI_NUMERICHOST | NI_NUMERICSERV);
 		if (iResult != 0) {
 			cerr << "getnameinfo failed with Code: " << iResult << endl;
-			for (int i = 0; i < socket_count; i++)
+			for (INT i = 0; i < socket_count; i++)
 			{
 				if (ServerSockets[i] != INVALID_SOCKET)
 					closesocket(ServerSockets[i]);
@@ -207,7 +208,7 @@ int main()
 	}
 
 	// 创建线程
-	for (int i = 0; i < socket_count; i++) {
+	for (INT i = 0; i < socket_count; i++) {
 		ServerThreads[i] = CreateThread(NULL, 0, ServerThread, (LPVOID)ServerSockets[i], 0, NULL);
 		if (ServerThreads[i] == NULL) {
 			cerr << "CreateThread failed with Code: " << GetLastError() << endl;
@@ -237,13 +238,13 @@ DWORD WINAPI ServerThread(LPVOID lpParam)
 {
 	SOCKET ServerSocket, ClientSocket = INVALID_SOCKET;
 	SOCKADDR_STORAGE from;
-	char servstr[NI_MAXSERV], hoststr[NI_MAXHOST];
-	int iResult, fromLen, socketType;
+	CHAR servstr[NI_MAXSERV], hoststr[NI_MAXHOST];
+	INT iResult, fromLen, socketType;
 
 	// 接收Socket参数
 	ServerSocket = (SOCKET) lpParam;
 	fromLen = sizeof(socketType);
-	iResult = getsockopt(ServerSocket, SOL_SOCKET, SO_TYPE, (char*)&socketType, &fromLen);
+	iResult = getsockopt(ServerSocket, SOL_SOCKET, SO_TYPE, (CHAR*)&socketType, &fromLen);
 	if (iResult == INVALID_SOCKET) {
 		cerr << "getsockopt(SO_TYPE) failed with Code: " << WSAGetLastError() << endl;
 		WSACleanup();
@@ -288,9 +289,9 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 	SocketInfo ClientInfo = *(SocketInfo*)lpParam;
 	SOCKET ClientSocket = ClientInfo.Sockfd;
 	string UserName, ChatTxt;
-	char Buffer[DEFAULT_BUFLEN];
-	int byteCount;
-	int iResult;
+	CHAR Buffer[DEFAULT_BUFLEN];
+	INT byteCount;
+	INT iResult;
 	CmdInfo CmdResult;
 
 	//获取用户信息
@@ -375,7 +376,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 					if (ChatSockets[ClientSocket] != INVALID_SOCKET)
 					{
 						sprintf_s(Buffer, DEFAULT_BUFLEN, "Server: %s connected with You!", ClientPortTransfer[atoi(ClientInfo.servstr)].c_str());
-						byteCount = send(ChatSockets[ClientSocket], Buffer, (int)strlen(Buffer) + 1, 0);
+						byteCount = send(ChatSockets[ClientSocket], Buffer, (INT)strlen(Buffer) + 1, 0);
 						if (byteCount == SOCKET_ERROR) {
 							send(ClientSocket, "send failed and redirected to Server", 37, 0);
 							ChatSockets[ClientSocket] = INVALID_SOCKET;
@@ -432,11 +433,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 				}
 				else if (CmdResult.cmd == "all") { // 查看在线用户
 					strcpy_s(Buffer, "Server: ");
-					for (map<int, string>::iterator i = ClientPortTransfer.begin(), j = ClientPortTransfer.end(); i != j; i++) {
+					for (map<INT, string>::iterator i = ClientPortTransfer.begin(), j = ClientPortTransfer.end(); i != j; i++) {
 						strcat_s(Buffer, i->second.c_str());
 						strcat_s(Buffer, " ");
 					}
-					byteCount = send(ClientSocket, Buffer, (int)strlen(Buffer) + 1, 0);
+					byteCount = send(ClientSocket, Buffer, (INT)strlen(Buffer) + 1, 0);
 					if (byteCount == SOCKET_ERROR) {
 						iResult = WSAGetLastError();
 						cerr << "send failed with Code: " << iResult << endl;
@@ -453,11 +454,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 				continue;
 			}
 			if (ChatSockets[ClientSocket] != INVALID_SOCKET) {
-				Buffer[byteCount] = '\0';
+				if(byteCount < DEFAULT_BUFLEN)
+					Buffer[byteCount] = '\0';
 				ChatTxt = Buffer;
-				// ChatTxt = ClientPortTransfer[atoi(ClientInfo.servstr)] + ": " + ChatTxt; // 客户端加密通信时，不方便去除首部信息，故删除
 				if (LinkToServer.find(ChatSockets[ClientSocket]) != LinkToServer.end()) { // 送信前需检查对方是否还在线
-					byteCount = send(ChatSockets[ClientSocket], ChatTxt.c_str(), (int)ChatTxt.length(), 0);
+					byteCount = send(ChatSockets[ClientSocket], ChatTxt.c_str(), (INT)ChatTxt.length(), 0);
 					if (byteCount == SOCKET_ERROR) {
 						send(ClientSocket, "send failed and redirected to Server", 37, 0);
 						if (byteCount == SOCKET_ERROR) {
@@ -514,7 +515,7 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 * CmdCheck：检查客户端发来的信息是否是命令
 * 参数：客户端发送的文本
 */
-DWORD WINAPI CmdCheck(char* Txt) {
+DWORD WINAPI CmdCheck(CHAR* Txt) {
 	if (Txt && Txt[0] == '<')
 		return 1;
 	return 0;
@@ -524,17 +525,17 @@ DWORD WINAPI CmdCheck(char* Txt) {
 * CmdCommit：解析客户端发送的命令，并将解析结果返回到ChatThread
 * 参数：客户端文本
 */
-CmdInfo WINAPI CmdCommit(char* txt) {
-	int txtLen = 0; // 文本长度
-	int argc = 0;   // 参数数量
+CmdInfo WINAPI CmdCommit(CHAR* txt) {
+	INT txtLen = 0; // 文本长度
+	INT argc = 0;   // 参数数量
 	string argv[10]; // 参数字符串
 	string unit; // 参数单元
 	CmdInfo result; // 解析结果
 	result.ChatSocket = INVALID_SOCKET;
 
 	// 分析命令文本
-	txtLen = (int)strlen(txt);
-	for (int i = 1; i < txtLen; i++) {
+	txtLen = (INT)strlen(txt);
+	for (INT i = 1; i < txtLen; i++) {
 		if (txt[i] == ' ') {
 			argv[argc++] = unit;
 			unit.clear();

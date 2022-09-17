@@ -52,6 +52,7 @@ using std::endl;
 using std::string;
 
 CHAR UserName[UserNameLen];
+CHAR PeerName[UserNameLen];
 CHAR redirectSelf[UserNameLen];
 HANDLE hChatThread[2]; // Reserver线程, Sender线程
 BOOL EncryptMode = FALSE;
@@ -375,11 +376,6 @@ VOID WINAPI MessageEncrypt(CHAR* Buffer,CHAR*oLen, CHAR* mLen)
 	itoa(Len, oLen, 10);                    // 原始信息长度转换为字符串
 	strcpy_s(Hash, SHA256(Buffer).c_str()); // 计算消息SHA256 -> SHA256已经是HEX格式
 	SignedHash = RSA_PriKey_Sign(Hash);		// 对SHA256值签名并以Hex格式存储
-
-	//cout << PrivateKey << endl;
-
-	//cout << "SignedHash:\n" << SignedHash << endl;
-
 	strcpy_s(msg, SignedHash.c_str());		// SHA256签名作为消息头，添加到msg中
 	strcat_s(msg, Buffer);					// 为消息添加签名后的SHA256首部
 	AES_ECB_Encrypt_ZeroPadding((BYTE*)msg, (BYTE*)Buffer, Len + (INT)SignedHash.size());// AES加密，结果存储在Buffer中
@@ -448,7 +444,8 @@ DWORD WINAPI CmdCheck(CHAR* txt) {
 	txtLen = lstrlenA(txt);
 	for (int i = 0; i < txtLen; i++) {
 		if (txt[i] == ' ') {
-			argv[argc++] = unit;
+			if (!unit.empty())
+				argv[argc++] = unit;
 			unit.clear();
 			continue;
 		}
@@ -457,7 +454,10 @@ DWORD WINAPI CmdCheck(CHAR* txt) {
 	}
 	argv[argc++] = unit;
 	if (argv[0] == ">exit") return 1;
-	else if (argv[0] == "<sendto") return 2;
+	else if (argv[0] == "<sendto") { 
+		strcpy_s(PeerName, argv[1].c_str());
+		return 2; 
+	}
 	else return 0;
 }
 
@@ -489,14 +489,26 @@ DWORD WINAPI msgCheck(CHAR* txt) {
 		unit.push_back(txt[i]);
 	}
 	argv[argc++] = unit;
-	if (argc == 5 && argv[2] == "connected" && argv[1] != UserName) return 1;
-	else if (argc == 8 && argv[1] == "friend") return 2;
-	else if (argc == 6 && argv[3] == "redirected") return 2;
+	if (argc == 5 && argv[2] == "connected" && argv[1] != UserName)
+	{
+		strcpy_s(PeerName, argv[1].c_str());
+		return 1; 
+	}
+	else if (argc == 8 && argv[1] == "friend")
+	{
+		ZeroMemory(PeerName, UserNameLen);
+		return 2;
+	}
+	else if (argc == 6 && argv[3] == "redirected")
+	{
+		ZeroMemory(PeerName, UserNameLen);
+		return 2;
+	}
 	else if (argc == 4 && argv[0] == "oLen" && argv[2] == "mLen") return 3; 
 	return 0;
 }
 
-DWORD GetOMLen(CHAR* txt, INT* oLen, INT* mLen) {
+DWORD GetHint(CHAR* txt, INT* oLen, INT* mLen) {
 	INT txtLen = 0;
 	INT argc = 0;
 	string argv[10];
@@ -506,7 +518,8 @@ DWORD GetOMLen(CHAR* txt, INT* oLen, INT* mLen) {
 	for (int i = 0; i < txtLen; i++) {
 		if (argc > 8) return 0;
 		if (txt[i] == ' ') {
-			argv[argc++] = unit;
+			if(!unit.empty())
+				argv[argc++] = unit;
 			unit.clear();
 			continue;
 		}
@@ -563,10 +576,11 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 			EncryptMode = TRUE;  // 被动加密
 		}
 		else if (iResult == 2) { // 明文模式（与服务器直接连接）
+			cout << Buffer << endl;
 			CleanEncrypt();
 		}
 		else if (iResult == 3) {
-			GetOMLen(Buffer, &oLen, &mLen); // 经过处理后Buffer已经变为原始信息长度
+			GetHint(Buffer, &oLen, &mLen); // 经过处理后Buffer已经变为原始信息长度
 			byteCount = recv(*ServerSocket, Buffer, DEFAULT_BUFLEN, 0); // 接收加密信息
 			if (mLen != byteCount)
 				cout << "mLen != ByteCount, please Check" << endl;
@@ -574,7 +588,7 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 			time(&Now);
 			localtime_s(&ptm, &Now);
 			strftime(strNow, DEFAULT_BUFLEN, "[%x %X] ", &ptm);
-			cout << strNow << Buffer << endl;
+			cout << strNow << PeerName << ": " << Buffer << endl;
 		}
 	}
 	return 0;
@@ -604,6 +618,7 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 		else if (iResult == 2) { // 聊天对象重定向 + 清除已有密钥 + 进入加密聊天
 			CleanEncrypt(); 
 			if (strcmp(Buffer, "<sendto Server") == 0 || strcmp(Buffer, redirectSelf) == 0) { // 重定向到Server | Self， 无需加密
+				ZeroMemory(PeerName, UserNameLen);
 				byteCount = send(*ServerSocket, Buffer, lstrlenA(Buffer) + 1, 0);
 				if (byteCount == SOCKET_ERROR) {
 					cerr << "send failed with Code: " << WSAGetLastError() << endl;
