@@ -342,6 +342,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 				cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 			ClientNameTransfer.erase(UserName);
 			ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+			if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+			{
+				ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+				send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+			}
 			ChatSockets.erase(ClientSocket);
 			LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 			closesocket(ClientSocket);
@@ -353,6 +358,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 				cerr << "shutdown failed with Code: " << WSAGetLastError() << endl;
 				ClientNameTransfer.erase(UserName);
 				ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+				if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+				{
+					ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+					send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+				}
 				ChatSockets.erase(ClientSocket);
 				LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 				closesocket(ClientSocket);
@@ -361,6 +371,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 			cout << ClientPortTransfer[atoi(ClientInfo.servstr)] << " from Port " << ClientInfo.servstr << " exited successfully" << endl;
 			ClientNameTransfer.erase(UserName);
 			ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+			if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+			{
+				ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+				send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+			}
 			ChatSockets.erase(ClientSocket);
 			LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 			closesocket(ClientSocket);
@@ -368,7 +383,6 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 		}
 		else {
 			cout << "read " << byteCount << " bytes" << endl;
-
 			if (CmdCheck(Buffer)) { // 检查是否是来自客户端的命令
 				CmdResult = CmdCommit(Buffer);
 				if (CmdResult.cmd == "sendto") { // redirect命令
@@ -390,6 +404,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 								cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 							ClientNameTransfer.erase(UserName);
 							ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+							if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+							{
+								ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+								send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+							}
 							ChatSockets.erase(ClientSocket);
 							LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 							closesocket(ClientSocket);
@@ -407,6 +426,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 									cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 								ClientNameTransfer.erase(UserName);
 								ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+								if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+								{
+									ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+									send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+								}
 								ChatSockets.erase(ClientSocket);
 								LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 								closesocket(ClientSocket);
@@ -423,6 +447,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 									cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 								ClientNameTransfer.erase(UserName);
 								ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+								if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+								{
+									ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+									send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+								}
 								ChatSockets.erase(ClientSocket);
 								LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 								closesocket(ClientSocket);
@@ -445,6 +474,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 							cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 						ClientNameTransfer.erase(UserName);
 						ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+						if(ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+						{
+							ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+							send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+						}
 						ChatSockets.erase(ClientSocket);
 						LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 						closesocket(ClientSocket);
@@ -468,6 +502,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 								cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 							ClientNameTransfer.erase(UserName);
 							ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+							if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+							{
+								ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+								send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+							}
 							ChatSockets.erase(ClientSocket);
 							LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 							closesocket(ClientSocket);
@@ -486,6 +525,11 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 							cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
 						ClientNameTransfer.erase(UserName);
 						ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+						if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+						{
+							ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+							send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+						}
 						ChatSockets.erase(ClientSocket);
 						LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 						closesocket(ClientSocket);
@@ -494,18 +538,6 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 					ChatSockets[ClientSocket] = INVALID_SOCKET;
 				}
 			}
-
-			//DEBUG: ECHO BACK
-			/*
-			byteCount = send(ClientSocket, Buffer, byteCount, 0);
-			if (byteCount == SOCKET_ERROR) {
-				iResult = WSAGetLastError();
-				cerr << "send failed with Code: " << iResult << endl;
-				closesocket(ClientSocket);
-				return 1;
-			}
-			cout << "wrote " << byteCount << " bytes" << endl;
-			*/
 		}
 	}
 	return 0;

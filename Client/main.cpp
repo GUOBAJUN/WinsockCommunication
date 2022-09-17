@@ -179,9 +179,13 @@ BOOL ActiveEncrypt = FALSE;
 DWORD WINAPI DH_generate_key()
 {
 	dh = DH_new();
-	dhP = BN_new();
-	BN_hex2bn(&dhP, DH_P);
-	dhG = BN_bin2bn(DH_G, sizeof(DH_G), NULL);
+	if (dhP == NULL)
+	{
+		dhP = BN_new();
+		BN_hex2bn(&dhP, DH_P);
+	}
+	if (dhG == NULL)
+		dhG = BN_bin2bn(DH_G, sizeof(DH_G), NULL);
 	if (dhP == NULL || dhG == NULL) {
 		cerr << "BN_bin2bn failed..." << endl;
 		DH_free(dh);
@@ -333,7 +337,7 @@ string RSA_PubKey_Verify(CHAR* Buffer, INT mLen) {
 }
 
 // 密钥交换
-DWORD WINAPI KeyConsult(SOCKET *ServerSocket) {
+DWORD WINAPI KeyConsult(SOCKET* ServerSocket) {
 	INT iResult, byteCount;
 	CHAR myPub[DEFAULT_BUFLEN], peerPub[DEFAULT_BUFLEN];
 	ZeroMemory(myPub, DEFAULT_BUFLEN);
@@ -411,12 +415,14 @@ VOID WINAPI MesssageDecrypt(CHAR* Buffer,INT oLen, INT mLen)
 // 清除加密凭证
 VOID WINAPI CleanEncrypt()
 {
-	if (!EncryptMode) return; // 非加密状态，无需清理
-	free(PrivateKey);
-	free(PublicKey);
+	if(PrivateKey)
+		free(PrivateKey);
+	if(PublicKey)
+		free(PublicKey);
 	PrivateKey = NULL;
 	PublicKey = NULL; // 清除RSA密钥
-	DH_free(dh); // 清除DH密钥
+	if(dh!=NULL)
+		DH_free(dh); // 清除DH密钥
 	ZeroMemory(AESKey, DEFAULT_AES_KEYLEN);
 	AESKeyLen = 0; // 清除AES密钥
 	EncryptMode = FALSE; // 退出加密模式
@@ -480,7 +486,7 @@ DWORD WINAPI msgCheck(CHAR* txt) {
 
 	txtLen = lstrlenA(txt);
 	for (int i = 0; i < txtLen; i++) {
-		if (argc > 8) return 0;
+		if (argc > 10) return 0;
 		if (txt[i] == ' ') {
 			argv[argc++] = unit;
 			unit.clear();
@@ -492,7 +498,7 @@ DWORD WINAPI msgCheck(CHAR* txt) {
 	if (argc == 5 && argv[2] == "connected" && argv[1] != UserName)
 	{
 		strcpy_s(PeerName, argv[1].c_str());
-		return 1; 
+		return 1;
 	}
 	else if (argc == 8 && argv[1] == "friend")
 	{
@@ -505,6 +511,7 @@ DWORD WINAPI msgCheck(CHAR* txt) {
 		return 2;
 	}
 	else if (argc == 4 && argv[0] == "oLen" && argv[2] == "mLen") return 3; 
+
 	return 0;
 }
 
@@ -572,7 +579,7 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 			if(byteCount < DEFAULT_BUFLEN)
 				Buffer[byteCount] = '\0';
 			cout << strNow << Buffer << endl; // 输出服务器的明文通告
-			KeyConsult(ServerSocket); // 与Peer协商密钥
+			KeyConsult(ServerSocket);
 			EncryptMode = TRUE;  // 被动加密
 		}
 		else if (iResult == 2) { // 明文模式（与服务器直接连接）
@@ -634,7 +641,7 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 					return 1;
 				}
 				ActiveEncrypt = TRUE; // 标记为主动加密
-				KeyConsult(ServerSocket); // 与peer协商AES密钥 交换RSA公钥
+				KeyConsult(ServerSocket);
 				EncryptMode = TRUE; // 进入加密聊天模式
 				ActiveEncrypt = FALSE; // 协商完毕，标志复位
 				continue;
@@ -649,7 +656,10 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 			hint.append(mLen);// 给予Peer一个Hint
 			send(*ServerSocket, hint.c_str(), (INT)hint.length(), 0);    // 加密模式下明文传输原始信息长度
 		}
-		byteCount = send(*ServerSocket, Buffer, atoi(mLen), 0);
+		if (EncryptMode)
+			byteCount = send(*ServerSocket, Buffer, atoi(mLen), 0);
+		else
+			byteCount = send(*ServerSocket, Buffer, lstrlenA(Buffer) + 1, 0);
 		if (byteCount == SOCKET_ERROR) {
 			cerr << "send failed with Code: " << WSAGetLastError() << endl;
 			*ServerSocket = INVALID_SOCKET;
