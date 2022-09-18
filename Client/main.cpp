@@ -593,7 +593,7 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 				cerr << "CreateHandle for hConsult failed..." << endl;
 				continue;
 			}
-			CloseHandle(hConsult);
+			WaitForSingleObject(hConsult, 3000);
 			EncryptMode = TRUE;
 		}
 		else if (iResult == 2) { // 明文模式（与服务器直接连接）
@@ -666,7 +666,7 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 					cerr << "CreateHandle for hConsult failed..." << endl;
 					continue;
 				}
-				CloseHandle(hConsult);
+				WaitForSingleObject(hConsult, 3000);
 				EncryptMode = TRUE; // 进入加密聊天模式
 				continue;
 			}

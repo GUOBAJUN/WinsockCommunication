@@ -388,6 +388,27 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 				if (CmdResult.cmd == "sendto") { // redirect命令
 					if (CmdResult.ChatSocket != INVALID_SOCKET)
 					{
+						if (ChatSockets[CmdResult.ChatSocket] != INVALID_SOCKET) { // 聊天占线
+							byteCount = send(ClientSocket, "Your friend is chatting with other people.", 43, 0);
+							if (byteCount == SOCKET_ERROR) {
+								iResult = WSAGetLastError();
+								cerr << "recv failed with Code: " << iResult << endl;
+								if (iResult == 10054)
+									cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
+								ClientNameTransfer.erase(UserName);
+								ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+								if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+								{
+									send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+									ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+								}
+								ChatSockets.erase(ClientSocket);
+								LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
+								closesocket(ClientSocket);
+								return 1;
+							}
+							continue;
+						}
 						if (ClientSocket == CmdResult.ChatSocket) {  // 重定向到自己
 							if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
 							{
@@ -402,8 +423,21 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 						sprintf_s(Buffer, DEFAULT_BUFLEN, "Server: %s connected with You!", ClientPortTransfer[atoi(ClientInfo.servstr)].c_str());
 						byteCount = send(ChatSockets[ClientSocket], Buffer, (INT)strlen(Buffer) + 1, 0);
 						if (byteCount == SOCKET_ERROR) {
-							send(ClientSocket, "send failed and redirected to Server", 37, 0);
-							ChatSockets[ClientSocket] = INVALID_SOCKET;
+							iResult = WSAGetLastError();
+							cerr << "recv failed with Code: " << iResult << endl;
+							if (iResult == 10054)
+								cerr << ClientPortTransfer[atoi(ClientInfo.servstr)] << " form port " << ClientInfo.servstr << " exited unexpectly" << endl;
+							ClientNameTransfer.erase(UserName);
+							ClientPortTransfer.erase(atoi(ClientInfo.servstr));
+							if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+							{
+								send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+								ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+							}
+							ChatSockets.erase(ClientSocket);
+							LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
+							closesocket(ClientSocket);
+							return 1;
 						}
 						ChatSockets[ChatSockets[ClientSocket]] = ClientSocket; // 反向重定向聊天
 						byteCount = send(ClientSocket, "Server: Redirected Successfully!", 33, 0);
