@@ -388,6 +388,16 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 				if (CmdResult.cmd == "sendto") { // redirect命令
 					if (CmdResult.ChatSocket != INVALID_SOCKET)
 					{
+						if (ClientSocket == CmdResult.ChatSocket) {  // 重定向到自己
+							if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+							{
+								send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+								ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+							}
+							ChatSockets[ClientSocket] = CmdResult.ChatSocket;
+							send(ClientSocket, "Server: Redirected Successfully!", 33, 0);
+							continue;
+						}
 						ChatSockets[ClientSocket] = CmdResult.ChatSocket;
 						sprintf_s(Buffer, DEFAULT_BUFLEN, "Server: %s connected with You!", ClientPortTransfer[atoi(ClientInfo.servstr)].c_str());
 						byteCount = send(ChatSockets[ClientSocket], Buffer, (INT)strlen(Buffer) + 1, 0);

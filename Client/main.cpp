@@ -517,8 +517,8 @@ DWORD sendtoCheck(CHAR* Buffer) {
 	}
 	argv[argc++] = unit;
 	if (argc != 2) return -1;
-	if (argv[1] == "Server" || argv[1] == UserName) return 1;
 	if (argv[1] == PeerName) return 2;
+	if (argv[1] == "Server" || argv[1] == UserName) return 1;
 	strcpy_s(PeerName, argv[1].c_str());
 	return 0;
 }
@@ -639,16 +639,17 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 		else if (iResult == 2) { // 聊天对象重定向 + 清除已有密钥 + 进入加密聊天
 			CleanEncrypt(); 
 			iResult = sendtoCheck(Buffer);
-			if (iResult == 1) { // 重定向到Server || Self || Peer， 无需加密
-				ZeroMemory(PeerName, UserNameLen);
+			if (iResult == 1) { // 重定向到Server || Self ， 无需加密
+				strcpy(PeerName, Buffer + 8);
 				byteCount = send(*ServerSocket, Buffer, lstrlenA(Buffer) + 1, 0);
 				if (byteCount == SOCKET_ERROR) {
 					cerr << "send failed with Code: " << WSAGetLastError() << endl;
 					*ServerSocket = INVALID_SOCKET;
 					return 1;
 				}
+				continue;
 			}
-			else if (iResult == 2) {
+			else if (iResult == 2) { //重复重定向
 				cout << "You've connected with " << PeerName << endl;
 				continue;
 			}
