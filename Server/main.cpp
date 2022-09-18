@@ -344,8 +344,8 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 			ClientPortTransfer.erase(atoi(ClientInfo.servstr));
 			if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
 			{
-				ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 				send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+				ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 			}
 			ChatSockets.erase(ClientSocket);
 			LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
@@ -360,8 +360,8 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 				ClientPortTransfer.erase(atoi(ClientInfo.servstr));
 				if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
 				{
-					ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 					send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+					ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 				}
 				ChatSockets.erase(ClientSocket);
 				LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
@@ -373,8 +373,8 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 			ClientPortTransfer.erase(atoi(ClientInfo.servstr));
 			if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
 			{
-				ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 				send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+				ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 			}
 			ChatSockets.erase(ClientSocket);
 			LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
@@ -386,9 +386,9 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 			if (CmdCheck(Buffer)) { // 检查是否是来自客户端的命令
 				CmdResult = CmdCommit(Buffer);
 				if (CmdResult.cmd == "sendto") { // redirect命令
-					ChatSockets[ClientSocket] = CmdResult.ChatSocket;
-					if (ChatSockets[ClientSocket] != INVALID_SOCKET)
+					if (CmdResult.ChatSocket != INVALID_SOCKET)
 					{
+						ChatSockets[ClientSocket] = CmdResult.ChatSocket;
 						sprintf_s(Buffer, DEFAULT_BUFLEN, "Server: %s connected with You!", ClientPortTransfer[atoi(ClientInfo.servstr)].c_str());
 						byteCount = send(ChatSockets[ClientSocket], Buffer, (INT)strlen(Buffer) + 1, 0);
 						if (byteCount == SOCKET_ERROR) {
@@ -406,8 +406,8 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 							ClientPortTransfer.erase(atoi(ClientInfo.servstr));
 							if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
 							{
-								ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 								send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+								ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 							}
 							ChatSockets.erase(ClientSocket);
 							LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
@@ -428,14 +428,20 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 								ClientPortTransfer.erase(atoi(ClientInfo.servstr));
 								if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
 								{
-									ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 									send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+									ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 								}
 								ChatSockets.erase(ClientSocket);
 								LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 								closesocket(ClientSocket);
 								return 1;
 							}
+							if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+							{
+								send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+								ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+							}
+							ChatSockets[ClientSocket] = CmdResult.ChatSocket;
 						}
 						else
 						{
@@ -449,14 +455,20 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 								ClientPortTransfer.erase(atoi(ClientInfo.servstr));
 								if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
 								{
-									ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 									send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+									ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 								}
 								ChatSockets.erase(ClientSocket);
 								LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
 								closesocket(ClientSocket);
 								return 1;
 							}
+							if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
+							{
+								send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+								ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
+							}
+							ChatSockets[ClientSocket] = CmdResult.ChatSocket;
 						}
 					}
 				}
@@ -476,8 +488,8 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 						ClientPortTransfer.erase(atoi(ClientInfo.servstr));
 						if(ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
 						{
-							ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 							send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+							ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 						}
 						ChatSockets.erase(ClientSocket);
 						LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
@@ -504,8 +516,8 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 							ClientPortTransfer.erase(atoi(ClientInfo.servstr));
 							if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
 							{
-								ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 								send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+								ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 							}
 							ChatSockets.erase(ClientSocket);
 							LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.
@@ -527,8 +539,8 @@ DWORD WINAPI ChatThread(LPVOID lpParam)
 						ClientPortTransfer.erase(atoi(ClientInfo.servstr));
 						if (ChatSockets[ChatSockets[ClientSocket]] != INVALID_SOCKET)
 						{
-							ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 							send(ChatSockets[ClientSocket], "Your friend has quit! And redirect to Server.", 46, 0);
+							ChatSockets[ChatSockets[ClientSocket]] = INVALID_SOCKET;
 						}
 						ChatSockets.erase(ClientSocket);
 						LinkToServer.erase(ClientSocket);// 断开连接需要清理旧的映射信息.

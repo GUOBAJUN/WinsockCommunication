@@ -53,7 +53,6 @@ using std::string;
 
 CHAR UserName[UserNameLen];
 CHAR PeerName[UserNameLen];
-CHAR redirectSelf[UserNameLen];
 HANDLE hChatThread[2]; // Reserver线程, Sender线程
 BOOL EncryptMode = FALSE;
 
@@ -173,10 +172,10 @@ DWORD AES_EBC_Decrypt_ZeroPadding(const BYTE* in , BYTE* out, INT inLen)
 // DH
 static const CHAR DH_P[] = "EBFB36DDEED6B166F8A2022ECCA3B64872E842FA4966A0B22A70188882E7894A1A08A9B3618DCF05CE61B973FC1977ED631953A51624273475AC4F8F3C7BF71D";
 static const BYTE DH_G[] = { 2 };
-DH* dh;
+DH* dh = NULL;
 BIGNUM* dhP, * dhG;
-BOOL ActiveEncrypt = FALSE;
-DWORD WINAPI DH_generate_key()
+CHAR myPub[DEFAULT_BUFLEN], peerPub[DEFAULT_BUFLEN];
+DWORD WINAPI DH_gen_key()
 {
 	dh = DH_new();
 	if (dhP == NULL)
@@ -202,6 +201,7 @@ DWORD WINAPI DH_generate_key()
 		cerr << "DH_generate_key failed..." << endl;
 		return 1;
 	}
+	strcpy_s(myPub, BN_bn2hex(DH_get0_pub_key(dh)));
 	return 0;
 }
 
@@ -337,37 +337,23 @@ string RSA_PubKey_Verify(CHAR* Buffer, INT mLen) {
 }
 
 // 密钥交换
-DWORD WINAPI KeyConsult(SOCKET* ServerSocket) {
-	INT iResult, byteCount;
-	CHAR myPub[DEFAULT_BUFLEN], peerPub[DEFAULT_BUFLEN];
-	ZeroMemory(myPub, DEFAULT_BUFLEN);
-	ZeroMemory(peerPub, DEFAULT_BUFLEN);
-	RSAinit(); // 生成本客户端的RSA密钥
-	iResult = DH_generate_key(); // 生成本客户端的DH密钥
-	if (ActiveEncrypt) { // 主动发起加密
-		SuspendThread(hChatThread[0]);                      // 由sender发起，暂停receiver线程
-		strcpy_s(myPub, BN_bn2hex(DH_get0_pub_key(dh)));
-		byteCount = send(*ServerSocket, myPub, lstrlenA(myPub) + 1, 0); // 发送自己的DH公钥 Hex
-		byteCount = recv(*ServerSocket, peerPub, DEFAULT_BUFLEN, 0);    // 接收PeerDH公钥 Hex
-		byteCount = send(*ServerSocket, PublicKey, DEFAULT_RSA_KETLEN, 0); // 发送自己的RSA公钥
-		byteCount = recv(*ServerSocket, RSAChatKey, DEFAULT_RSA_KETLEN, 0); // 接收peer的RSA公钥
-	}
-	else {
-		SuspendThread(hChatThread[1]);                      // 由receiver发起，暂停sender线程
-		byteCount = recv(*ServerSocket, peerPub, DEFAULT_BUFLEN, 0);    // 接收PeerDH公钥 Hex
-		strcpy_s(myPub, BN_bn2hex(DH_get0_pub_key(dh)));
-		byteCount = send(*ServerSocket, "Chat Encrypted", 15, 0); // 结束Peer的Receiver的recv函数
-		byteCount = send(*ServerSocket, myPub, lstrlenA(myPub) + 1, 0); // 发送自己的DH公钥 Hex
-		byteCount = recv(*ServerSocket, RSAChatKey, DEFAULT_RSA_KETLEN, 0); // 接收peer的RSA公钥
-		byteCount = send(*ServerSocket, PublicKey, DEFAULT_RSA_KETLEN, 0); //发送自己的RSA公钥
-	}
-	DH_calc_shared_key(peerPub); // 计算AES128密钥
-	AESInit();                   // 初始化AES加密模块
-	if (ActiveEncrypt)
-		ResumeThread(hChatThread[0]);
-	else
-		ResumeThread(hChatThread[1]); // 恢复全双工通信
-	return 0;
+DWORD WINAPI KeyConsult(LPVOID lpParam) {
+	SOCKET* ServerSocket = (SOCKET*)lpParam;
+	string sendBuf;
+	INT byteCount;
+	sendBuf.clear();
+	sendBuf.append("Diffie-Hellman ");
+	sendBuf.append(myPub);
+	sendBuf.append(" RSA-Pub ");
+	sendBuf.append(PublicKey);
+	byteCount = send(*ServerSocket, sendBuf.c_str(), (INT)sendBuf.length() + 1, 0); //发送自己的公钥
+	while (RSAChatKey[0] == '\0' || peerPub[0] == '\0');// 等待接收公钥
+	// cout << peerPub << endl;
+	// cout << RSAChatKey << endl;
+	DH_calc_shared_key(peerPub);	// 计算AES128密钥
+	AESInit();						// 初始化AES加密模块
+	cout << "System: Your Message will be encrypted." << endl;
+	ExitThread(0);
 }
 
 // 综合信息加密
@@ -415,17 +401,11 @@ VOID WINAPI MesssageDecrypt(CHAR* Buffer,INT oLen, INT mLen)
 // 清除加密凭证
 VOID WINAPI CleanEncrypt()
 {
-	if(PrivateKey)
-		free(PrivateKey);
-	if(PublicKey)
-		free(PublicKey);
-	PrivateKey = NULL;
-	PublicKey = NULL; // 清除RSA密钥
-	if(dh!=NULL)
-		DH_free(dh); // 清除DH密钥
+	ZeroMemory(RSAChatKey, DEFAULT_RSA_KETLEN);		// 清除保存的RSA公钥
+	ZeroMemory(peerPub, DEFAULT_BUFLEN);			// 清除保存的DH公钥
 	ZeroMemory(AESKey, DEFAULT_AES_KEYLEN);
-	AESKeyLen = 0; // 清除AES密钥
-	EncryptMode = FALSE; // 退出加密模式
+	AESKeyLen = 0;									// 清除协商的AES密钥
+	EncryptMode = FALSE;							// 退出加密模式
 }
 
 
@@ -461,7 +441,6 @@ DWORD WINAPI CmdCheck(CHAR* txt) {
 	argv[argc++] = unit;
 	if (argv[0] == ">exit") return 1;
 	else if (argv[0] == "<sendto") { 
-		strcpy_s(PeerName, argv[1].c_str());
 		return 2; 
 	}
 	else return 0;
@@ -477,11 +456,12 @@ DWORD WINAPI CmdCheck(CHAR* txt) {
 * return 1 进入加密
 * return 2 退出加密
 * return 3 接下来回收信保密信息
+* return 4 收到了公钥
 */
 DWORD WINAPI msgCheck(CHAR* txt) {
 	INT txtLen = 0;
 	INT argc = 0;
-	string argv[10];
+	string argv[15];
 	string unit;
 
 	txtLen = lstrlenA(txt);
@@ -500,18 +480,46 @@ DWORD WINAPI msgCheck(CHAR* txt) {
 		strcpy_s(PeerName, argv[1].c_str());
 		return 1;
 	}
-	else if (argc == 8 && argv[1] == "friend")
+	if (argc == 8 && argv[1] == "friend")
 	{
 		ZeroMemory(PeerName, UserNameLen);
 		return 2;
 	}
-	else if (argc == 6 && argv[3] == "redirected")
+	if (argc == 6 && argv[3] == "redirected")
 	{
 		ZeroMemory(PeerName, UserNameLen);
 		return 2;
 	}
-	else if (argc == 4 && argv[0] == "oLen" && argv[2] == "mLen") return 3; 
+	if (argc == 4 && argv[0] == "oLen" && argv[2] == "mLen") return 3; 
+	if (argc == 10 && argv[0] == "Diffie-Hellman") {
+		strcpy_s(peerPub, argv[1].c_str());
+		strcpy_s(RSAChatKey, txt + 152);
+		return 4;
+	}
+	return 0;
+}
 
+DWORD sendtoCheck(CHAR* Buffer) {
+	INT Len = lstrlenA(Buffer);
+	string unit;
+	string argv[10];
+	INT argc = 0;
+	for (INT i = 0; i < Len; i++) {
+		if (Buffer[i] == ' ') {
+			if (!unit.empty()) 
+				argv[argc++] = unit;
+			if (argc > 4)
+				break;
+			unit.clear();
+			continue;
+		}
+		unit.push_back(Buffer[i]);
+	}
+	argv[argc++] = unit;
+	if (argc != 2) return -1;
+	if (argv[1] == "Server" || argv[1] == UserName) return 1;
+	if (argv[1] == PeerName) return 2;
+	strcpy_s(PeerName, argv[1].c_str());
 	return 0;
 }
 
@@ -579,8 +587,14 @@ DWORD WINAPI Receiver(LPVOID lpParam) {
 			if(byteCount < DEFAULT_BUFLEN)
 				Buffer[byteCount] = '\0';
 			cout << strNow << Buffer << endl; // 输出服务器的明文通告
-			KeyConsult(ServerSocket);
-			EncryptMode = TRUE;  // 被动加密
+			HANDLE hConsult;
+			hConsult = CreateThread(NULL, 0, KeyConsult, (LPVOID)ServerSocket, 0, NULL);
+			if (hConsult == NULL) {
+				cerr << "CreateHandle for hConsult failed..." << endl;
+				continue;
+			}
+			CloseHandle(hConsult);
+			EncryptMode = TRUE;
 		}
 		else if (iResult == 2) { // 明文模式（与服务器直接连接）
 			cout << Buffer << endl;
@@ -624,7 +638,8 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 		}
 		else if (iResult == 2) { // 聊天对象重定向 + 清除已有密钥 + 进入加密聊天
 			CleanEncrypt(); 
-			if (strcmp(Buffer, "<sendto Server") == 0 || strcmp(Buffer, redirectSelf) == 0) { // 重定向到Server | Self， 无需加密
+			iResult = sendtoCheck(Buffer);
+			if (iResult == 1) { // 重定向到Server || Self || Peer， 无需加密
 				ZeroMemory(PeerName, UserNameLen);
 				byteCount = send(*ServerSocket, Buffer, lstrlenA(Buffer) + 1, 0);
 				if (byteCount == SOCKET_ERROR) {
@@ -633,17 +648,25 @@ DWORD WINAPI Sender(LPVOID lpParam) {
 					return 1;
 				}
 			}
-			else { // 重定向到有效peer
+			else if (iResult == 2) {
+				cout << "You've connected with " << PeerName << endl;
+				continue;
+			}
+			else if(iResult == 0) { // 重定向到有效peer
 				byteCount = send(*ServerSocket, Buffer, lstrlenA(Buffer) + 1, 0);
 				if (byteCount == SOCKET_ERROR) {
 					cerr << "send failed with Code: " << WSAGetLastError() << endl;
 					*ServerSocket = INVALID_SOCKET;
 					return 1;
 				}
-				ActiveEncrypt = TRUE; // 标记为主动加密
-				KeyConsult(ServerSocket);
+				HANDLE hConsult;
+				hConsult = CreateThread(NULL, 0, KeyConsult, (LPVOID)ServerSocket, 0, NULL);
+				if (hConsult == NULL) {
+					cerr << "CreateHandle for hConsult failed..." << endl;
+					continue;
+				}
+				CloseHandle(hConsult);
 				EncryptMode = TRUE; // 进入加密聊天模式
-				ActiveEncrypt = FALSE; // 协商完毕，标志复位
 				continue;
 			}
 		}
@@ -699,8 +722,9 @@ int main(int argc, CHAR **argv) {
 		cerr << "Usage: " << argv[0] << " [ServerIP] [UserName]" << endl;
 		return 1;
 	}
-	strcpy_s(redirectSelf, "<sendto ");
-	strcat_s(redirectSelf, UserName);
+
+	system("cls");
+	cout << "Client initing..." << endl;
 
 	// 初始化WSADATA
 	iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -727,7 +751,15 @@ int main(int argc, CHAR **argv) {
 		WSACleanup();
 		return 1;
 	}
+
+	// 生成本地密钥
+	RSAinit(); // 生成本客户端的RSA密钥
+	DH_gen_key(); // 生成本客户端的DH密钥
+
+	// cout << myPub <<'\n' << endl;
 	
+	cout << "Client up!!!" << endl;
+
 	// 连接到服务器
 	ptr = results;
 	while (ptr) {
